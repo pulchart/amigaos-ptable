@@ -1,0 +1,129 @@
+Short:        AmigaOS partition-table library (RDB/MBR/GPT)
+Uploader:     jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
+Author:       jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
+Type:         util/libs
+Version:      @VERSION@
+Requires:     AmigaOS 2.0+; a consumer such as compactflash.device or fat95; ROM-resident for cold-boot autoboot
+Architecture: m68k-amigaos
+Kurz:         AmigaOS Partitionstabellen-Library (RDB/MBR/GPT)
+
+ptable.library is the AmigaOS partition-table library: one place that parses
+RDB, MBR, GPT and flat layouts and publishes every partition into a shared
+partition.resource, so a device driver and a filesystem handler never each
+carry their own partition parser.
+
+It was assembled from existing code: the library framework and RDB cold-boot
+path came from compactflash.device, the MBR/GPT scanning from fat95.
+
+Consumed by compactflash.device 2.0+ (driver/media/cfd) and fat95 4.0+ (disk/misc/fat95).
+
+COMPONENTS IN THIS RELEASE
+==========================
+@COMPONENT_VERSIONS@
+
+WHAT'S NEW (@DATE@)
+=======================
+
+ptable.library:
+
+* Unified partition scanning: one scanner parses RDB, MBR, GPT, and flat
+  (whole-disk FAT) partition tables and publishes every partition into a
+  shared partition.resource, now consumed by both compactflash.device and
+  fat95 instead of each carrying its own parser. See docs/ptable.guide.
+
+lsptres:
+
+* New CLI that lists the contents of partition.resource. See
+  docs/lsptres.guide.
+
+WHAT IT DOES
+============
+* Cold-boot RDB autoboot: boot directly from an RDB-partitioned card
+  (requires the library ROM-resident).
+* DOS-time scanning and automount: discover and mount hotplugged
+  RDB/MBR/GPT/flat cards, via the consuming driver.
+* Publishes a shared partition.resource that any driver or handler can read
+  instead of parsing the partition table itself.
+
+REQUIREMENTS
+============
+* AmigaOS 2.0 or higher.
+* A consumer that uses the library: compactflash.device (driver/media/cfd)
+  or fat95 (disk/misc/fat95). ptable.library on its own does nothing.
+* For cold-boot autoboot the library must be ROM-resident (Remus / Capitoline).
+  A disk-loaded copy is used for DOS-time scanning only.
+
+INSTALLATION
+============
+The archive ships two flavours (full / small) and two CPU tiers, each as a
+sysroot ready to drop onto SYS:.
+
+  68020+ (A1200 stock, 68020+):
+    full/68020/libs/ptable.library    debug-capable (serial output at boot)
+    small/68020/libs/ptable.library   no debug code
+
+  68000 (stock A600, 68000+):
+    full/68000/libs/ptable.library    debug-capable (serial output at boot)
+    small/68000/libs/ptable.library   no debug code
+
+1. Drag the contents of <flavor>/<cpu>/ onto SYS: (the inner libs/ drawer maps
+   onto SYS:Libs/), or copy the chosen ptable.library to LIBS: by hand.
+     - A1200 (68020+): full/68020/ (or small/68020/)
+     - A600  (68000+): full/68000/ (or small/68000/)
+2. Copy c/lsptres to C: (optional; lists partition.resource).
+3. For cold-boot autoboot, put ptable.library in ROM with Remus or Capitoline.
+
+Use the full flavour if you want serial debug output at boot; use small for a
+minimal footprint (no debug strings/code).
+
+LSPTRES
+=======
+lsptres dumps the current contents of partition.resource (the partitions the
+library has published: name, DOSType, geometry, and the resolved mount
+Flags/CONTROL). Run it with no arguments:
+
+  lsptres
+
+See docs/lsptres.guide for the full output description.
+
+SOURCE CODE
+===========
+Source code available at: https://github.com/pulchart/amigaos-ptable
+
+Licensed under GNU LGPL v2.1.
+
+SUPPORT
+=======
+The improvements are developed in my free time. If you'd like to support
+ongoing maintenance and experimentation, you can do so on Ko-fi:
+https://ko-fi.com/jaroslavpulchart
+
+HISTORY
+=======
+See docs/changes.guide for release notes.
+Online version: https://github.com/pulchart/amigaos-ptable/blob/HEAD/docs/changes.md
+
+CHECKSUMS
+=========
+@TOOL_CHECKSUMS@
+
+CONTENTS
+========
+ptable/full/<cpu>/   - per-CPU "full" sysroot (debug-capable library)
+ptable/small/<cpu>/  - per-CPU "small" sysroot (no debug code/strings)
+
+ptable.library - partition scanner publishing partition.resource:
+ptable/full/68020/libs/ptable.library   - 68020+, debug-capable (serial output at boot)
+ptable/small/68020/libs/ptable.library  - 68020+, no debug code
+ptable/full/68000/libs/ptable.library   - 68000+, debug-capable (serial output at boot)
+ptable/small/68000/libs/ptable.library  - 68000+, no debug code
+
+ptable/c/lsptres - partition.resource lister
+
+ptable/docs/ptable.guide  - Main documentation
+ptable/docs/lsptres.guide - lsptres utility documentation
+ptable/docs/changes.guide - Release notes
+
+ptable/src/ - Full source code
+
+ptable/LICENSE - GNU LGPL v2.1

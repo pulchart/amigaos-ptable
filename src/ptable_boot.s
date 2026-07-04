@@ -1,9 +1,11 @@
 ;===========================================================
-; ptable_boot.s -- BootScanRDB body and helpers
+; ptable_boot.s - BootScanPartitions entry, BootCtx machinery, device IO
 ;
-; Device-agnostic: takes a device name and unit from the
-; caller, opens that device, walks the RDB, and registers
-; partitions via expansion.library.
+; Device-agnostic: takes a device name and unit from the caller and
+; opens that device. BootScanPartitions is the cold stage of the unified
+; pipeline: scan + publish everything (ptable_scan.s), then register
+; every mountable entry (ptable_act.s cold act) so System-Startup
+; starts the handlers (steps 3-8 of the boot sequence).
 ;
 ; Register conventions inside this block:
 ;   a4 = &BootCtx (allocated on entry, freed on exit)
@@ -131,8 +133,94 @@ dn_SegList	= 32
 dn_GlobVec	= 36
 dn_Name		= 40
 
+;--- shared dos/exec pieces used by the scan + act stages ---
+AddTail		= -246			;exec (entry publish order)
+
+;-- dos.library LVOs (runtime acts only; never called pre-DOS)
+LockDosList	= -654
+UnLockDosList	= -660
+RemDosEntry	= -672
+NextDosEntry	= -690
+
+;-- exec task/message LVOs for the ACTION_DIE round-trip
+Wait		= -318
+PutMsg		= -366
+GetMsg		= -372
+
+ADNF_STARTPROC	= 1
+ACTION_DIE	= 5
+PAD_POLL_MAX	= 30			;ACTION_DIE death-poll tries (x100 ms = 3 s)
+LDF_WRITE	= 2
+LDF_DEVICES	= 4
+
+;-- struct Process / DosList / DosPacket (subset)
+TC_SIZE		= 92
+pr_MsgPort	= TC_SIZE		;Process: pr_Task then pr_MsgPort
+dol_Task	= 8			;DosList/DeviceNode handler process
+dp_Link		= 0
+dp_Port		= 4
+dp_Type		= 8
+SP_SIZEOF	= 68			;MN_SIZE(20) + dp_SIZEOF(48)
+
+;-- DosEnvec longword indexes (DE_BOOTPRI/DE_DOSTYPE defined above)
+DE_TableSize	= 0
+DE_SizeBlock	= 1
+DE_SecOrg	= 2
+DE_Surfaces	= 3
+DE_SectorPerBlk	= 4
+DE_BlocksPerTrk	= 5
+DE_Reserved	= 6
+DE_PreAlloc	= 7
+DE_Interleave	= 8
+DE_LowCyl	= 9
+DE_HighCyl	= 10
+DE_NumBuffers	= 11
+DE_BufMemType	= 12
+DE_MaxTransfer	= 13
+DE_Mask		= 14
+
+;-- debug trace helpers shared by the scan/act/runtime stages.
+;   PTMSG label : print a string, preserve all registers.
+;   PTNUM label : print "label <d0 hex8>" + newline, preserve d0.
+	ifd	DEBUG
+PTMSG	macro
+	movem.l	d0/a0,-(sp)
+	lea	\1(pc),a0
+	bsr	_bootDebug
+	movem.l	(sp)+,d0/a0
+	endm
+PTNUM	macro
+	move.l	d0,-(sp)
+	lea	\1(pc),a0
+	bsr	_bootDebug
+	move.l	(sp),d0
+	bsr	_bootDebugHex8
+	lea	dbg_boot_nl(pc),a0
+	bsr	_bootDebug
+	move.l	(sp)+,d0
+	endm
+;   PTDEC label : print "label <d0 decimal>" + newline, preserve d0.
+PTDEC	macro
+	move.l	d0,-(sp)
+	lea	\1(pc),a0
+	bsr	_bootDebug
+	move.l	(sp),d0
+	bsr	_bootDebugDec32
+	lea	dbg_boot_nl(pc),a0
+	bsr	_bootDebug
+	move.l	(sp)+,d0
+	endm
+	else
+PTMSG	macro
+	endm
+PTNUM	macro
+	endm
+PTDEC	macro
+	endm
+	endc
+
 ;===========================================================
-; BootCtx layout (one AllocMem on BootScanRDB entry):
+; BootCtx layout (one AllocMem on BootScanPartitions entry):
 ;
 ;   offset  size  field
 ;   ------  ----  --------------------------------------------
@@ -153,7 +241,7 @@ dn_Name		= 40
 ;     124     4   BC_DevName      caller's device name string
 ;     128     4   BC_DevNameBSTR  cached BSTR(BPTR) of BC_DevName
 ;                                 for fssm_Device (0 = alloc failed,
-;                                 _bootAddOnePartition then skips)
+;                                 _actBuildBlob then skips)
 ;     132   512   block buffer (BC_BlockBuf points here)
 
 BC_ExecBase	= 0
@@ -168,19 +256,22 @@ BC_HaveNodes	= 26
 BC_PartCount	= 27
 BC_DevMsgPort	= 28
 BC_DevIOReq	= 62
-BC_Pad2		= 118
+BC_ReadMode	= 118		;cached read method (0 = not yet probed)
 BC_ConfigDev	= 120
 BC_DevName	= 124
 BC_DevNameBSTR	= 128
-BC_Sizeof	= 132
+BC_UnmountPrefixes = 132	;ptr to 0-terminated dostype-prefix list (UnmountPartitions); 0 = all
+BC_MountCfg	= 136		;APTR MountCfg (MountPartitions); 0 = cold-boot defaults
+BC_Sizeof	= 140
 
 BC_BUF_BYTES	= 512
 
-;--- DeviceNode blob layout (built by _bootAddOnePartition) ---
+;--- DeviceNode blob layout (built by _actBuildBlob) ---
 DN_FSSM_OFF	= 44
 DN_ENVEC_OFF	= 60
 DN_BSTR_OFF	= 144
-DN_BLOB_SIZE	= 176
+DN_CTRL_OFF	= 176		;32-byte CONTROL BSTR (de_Control points here)
+DN_BLOB_SIZE	= 208
 
 ;===========================================================
 ; Constants: ROM strings used during scan
@@ -199,38 +290,40 @@ FileSysResName:
 ;--- Debug strings (only emitted in DEBUG builds) ----------
 	ifd	DEBUG
 dbg_boot_start:
-	dc.b	"[RDB] scan",CR,LF,0
+	dc.b	"[PT] cold boot: scanning for partitions",CR,LF,0
 dbg_boot_no_card:
-	dc.b	"[RDB] no card",CR,LF,0
+	dc.b	"[PT] no card / no media",CR,LF,0
 dbg_boot_no_rdb:
-	dc.b	"[RDB] no RDB",CR,LF,0
+	dc.b	"[PT] no partition table (not RDB/MBR/GPT/FAT)",CR,LF,0
 dbg_boot_fs_add:
-	dc.b	"[RDB] +fs ",0
+	dc.b	"[PT] + filesystem handler ",0
 dbg_boot_part_boot:
-	dc.b	"[RDB] +boot ",0
+	dc.b	"[PT] + boot  ",0
 dbg_boot_part_dos:
-	dc.b	"[RDB] +dos  ",0
+	dc.b	"[PT] + mount ",0
 dbg_boot_part_skip:
-	dc.b	"[RDB] skip ",0
+	dc.b	"[PT] - skip  ",0
 dbg_boot_done:
-	dc.b	"[RDB] done",CR,LF,0
+	dc.b	"[PT] cold boot done, partitions registered: ",0
 dbg_boot_exp_fail:
-	dc.b	"[RDB] err: no exp.lib",CR,LF,0
+	dc.b	"[PT] error: expansion.library not available",CR,LF,0
 dbg_boot_no_mem:
-	dc.b	"[RDB] err: no mem",CR,LF,0
+	dc.b	"[PT] error: out of memory",CR,LF,0
 dbg_boot_opendev_err:
-	dc.b	"[RDB] err: OpenDevice $",0
+	dc.b	"[PT] cannot open device, error ",0
 dbg_boot_rdsk_found:
-	dc.b	"[RDB] found RDSK",CR,LF,0
+	dc.b	"[PT] RDB partition table",CR,LF,0
 dbg_boot_nl:
 	dc.b	CR,LF,0
+dbg_boot_skip_tail:
+	dc.b	" (no-mount)",CR,LF,0
 dbg_hunk_badid:
-	dc.b	"[RDB] hunk: bad id $",0
+	dc.b	"[PT] hunk: bad id $",0
 	endc
 	even
 
 ;===========================================================
-; BootScanRDB
+; BootScanPartitions
 ;
 ; Inputs:
 ;   a1 = device name (NUL-terminated C-string)
@@ -238,12 +331,16 @@ dbg_hunk_badid:
 ;   a6 = LibBase
 ;
 ; Output:
-;   d0 = number of partitions registered (0 = no card / no RDB
-;        / allocation failure / etc.)
+;   d0 = number of partitions registered (0 = no card / nothing
+;        recognised / allocation failure / etc.)
+;
+; Cold stage of the unified pipeline: publish every partition
+; (RDB/MBR/GPT/flat) into partition.resource, then cold-register
+; the mountable ones (AddBootNode / AddDosNode flags=0).
 ;
 ; Preserves d2-d7/a2-a5/a6
 ;===========================================================
-BootScanRDB:
+BootScanPartitions:
 	movem.l	d2-d7/a2-a6,-(sp)
 	move.l	a1,d6			;d6 = device name
 	move.l	d0,d5			;d5 = unit
@@ -272,8 +369,8 @@ bs_haveCtx:
 	move.b	#-1,BC_SigOK(a4)	;sentinel: no signal allocated yet
 
 ;-- Cache the device-name BSTR once per scan; reused for every
-;   partition's fssm_Device.  On failure the slot stays 0
-;   (BootCtx is MEMF_CLEAR) and _bootAddOnePartition skips.
+;   partition's fssm_Device. On failure the slot stays 0
+;   (BootCtx is MEMF_CLEAR) and _actBuildBlob skips.
 	move.l	BC_DevName(a4),a0
 	move.l	a5,a6
 	bsr	_bootMakeExecBSTR
@@ -296,7 +393,7 @@ bs_haveExp:
 ;-- Synthesize a ConfigDev for the device.
 ;   (The ConfigDev's CD_NODE_NAME points at the caller's device
 ;   name string so strap renders the early-startup menu against
-;   the correct device.  ER_TYPE = ERTF_DIAGVALID together with
+;   the correct device. ER_TYPE = ERTF_DIAGVALID together with
 ;   er_Reserved0c -> s_rdb_diag_rom drives the BootPoint flow:
 ;   strap copies the DiagArea to RAM and calls da_BootPoint,
 ;   which then runs FindResident("dos.library") + RT_INIT.)
@@ -320,7 +417,7 @@ bs_haveExp:
 	move.l	#$00080000,CD_BOARDSIZE(a2)	;512 KB
 bs_no_cd:
 
-;-- open dos.library; used for Delay() only.  OK to be NULL.
+;-- open dos.library; used for Delay() only. OK to be NULL.
 	move.l	a5,a6
 	moveq.l	#0,d0
 	lea	DosName(pc),a1
@@ -332,17 +429,22 @@ bs_no_cd:
 	bsr	_bootDebug
 	endc
 
-;-- open the requested unit, run the scan, close the unit.
+;-- open the requested unit, publish + cold-register, close the unit.
 	bsr	_bootOpenUnit
 	tst.l	d0
 	beq.s	bs_close_unit
-	bsr	_bootScanRdb
+	bsr	_partLockRes		;writer lock (uniform; pre-DOS is
+	tst.l	d0			;single-threaded anyway)
+	beq.s	bs_close_unit
+	bsr	_scanRun		;publish all partitions + RDB FSes
+	bsr	_actCold		;register the mountable entries
+	bsr	_partUnlockRes
 bs_close_unit:
 	bsr	_bootCloseUnit		;idempotent: handles partial open
 
 ;-- Register synthetic ConfigDev with strap (eb_CDevList) so the
 ;   early-startup boot menu shows the device and the BootPoint
-;   fires when the user picks a bootable partition.  Guarded:
+;   fires when the user picks a bootable partition. Guarded:
 ;   only call when at least one partition was registered.
 	tst.b	BC_HaveNodes(a4)
 	beq.s	bs_close
@@ -367,12 +469,16 @@ bs_close1:
 	jsr	CloseLibrary(a6)
 
 bs_cleanup:
+	moveq.l	#0,d6
+	move.b	BC_PartCount(a4),d6	;return value = partitions registered
 	ifd	DEBUG
 	lea	dbg_boot_done(pc),a0
 	bsr	_bootDebug
+	move.l	d6,d0
+	bsr	_bootDebugDec32
+	lea	dbg_boot_nl(pc),a0
+	bsr	_bootDebug
 	endc
-	moveq.l	#0,d6
-	move.b	BC_PartCount(a4),d6	;return value = partitions registered
 	move.l	a4,a1
 	move.l	#BC_Sizeof+BC_BUF_BYTES,d0
 	move.l	BC_ExecBase(a4),a6
@@ -423,7 +529,6 @@ _bou_sig_ok:
 ;-- OpenDevice (caller-supplied name + unit)
 	move.l	BC_DevName(a4),a0
 	move.l	BC_Unit(a4),d0
-	;moveq.l	#9,d1			;Flags=1|8: SocketOn + serial debug
 	moveq.l	#0,d1
 	jsr	OpenDevice(a6)
 	tst.l	d0
@@ -492,7 +597,7 @@ _bcu_end:
 	rts
 
 ;===========================================================
-; _bootDelay100ms: sleep ~100 ms.  Uses dos.library/Delay(5)
+; _bootDelay100ms: sleep ~100 ms. Uses dos.library/Delay(5)
 ; if DosBase is open, otherwise a rough busy-wait (~350k
 ; simple insns is ~100ms on a 7 MHz 68000).
 ;===========================================================
@@ -534,30 +639,154 @@ _bootReadBlock:
 	rts
 
 ;===========================================================
-; _bootReadBytes64: NSCMD_TD_READ64 wrapper.
-; (NSCMD reads bypass any CMD_READ partition-base intercept on the
-; device, since we hand both halves of the 64-bit offset
-; explicitly here.)
+; _bootReadBytes64: read bytes at a 64-bit byte offset.
+;
+; The read command varies by device: modern drivers (compactflash,
+; scsi.device) take NSCMD_TD_READ64, floppy drivers (mfm.device) only
+; CMD_READ, and old controllers sit in between. On the first read we
+; probe NSCMD_TD_READ64 -> TD_READ64 -> HD_SCSICMD -> CMD_READ, keep the
+; first the device accepts (anything but IOERR_NOCMD), and cache it in
+; BC_ReadMode for the rest of the scan.
 ;
 ; Input : d0.l = high32, d1.l = low32, d2.l = bytes,
 ;         a1   = destination, a4 = &BootCtx
 ; Output: d0 = 0 on success, nonzero IO_Error otherwise
 ;===========================================================
 _bootReadBytes64:
-	movem.l	d1-d2/a0/a1/a6,-(sp)
+	movem.l	d1-d6/a0-a3/a6,-(sp)
 	move.l	BC_ExecBase(a4),a6
+	move.l	d0,d3			;d3 = high32
+	move.l	d1,d4			;d4 = low32
+	move.l	d2,d5			;d5 = byte length
+	move.l	a1,a3			;a3 = destination
+
+	moveq.l	#0,d0
+	move.b	BC_ReadMode(a4),d0
+	bne.s	_brb_dispatch		;already probed -> use cached method
+
+;-- probe NSCMD(1) -> TD64(2) -> SCSI(3) -> CMD_READ(4)
+	moveq.l	#1,d6			;d6 = trial method
+_brb_probe:
+	move.l	d6,d0
+	bsr	_brb_try		;d0 = IO_Error
+	tst.b	d0
+	beq.s	_brb_cache		;this method actually read -> use it
+	cmp.b	#4,d6
+	beq.s	_brb_cache		;CMD_READ is the last resort (cache anyway)
+	addq.l	#1,d6
+	bra.s	_brb_probe
+_brb_cache:
+	move.b	d6,BC_ReadMode(a4)
+	bra.s	_brb_ret
+
+_brb_dispatch:
+	bsr	_brb_try		;d0 = method in, IO_Error out
+_brb_ret:
+	movem.l	(sp)+,d1-d6/a0-a3/a6
+	rts
+
+;-- _brb_try: issue one read with method d0; d3=hi d4=lo d5=len a3=dest
+;   a4=ctx a6=ExecBase. Returns d0 = IO_Error.
+_brb_try:
 	lea	BC_DevIOReq(a4),a0
-	move.w	#NSCMD_TD_READ64,IO_Command(a0)
 	clr.b	IO_Error(a0)
-	move.l	d0,IO_Actual(a0)	;high 32 bits
-	move.l	d1,IO_Offset(a0)	;low  32 bits
-	move.l	d2,IO_Length(a0)
-	move.l	a1,IO_Data(a0)
+	cmp.b	#1,d0
+	beq.s	_brt_nscmd
+	cmp.b	#2,d0
+	beq.s	_brt_td64
+	cmp.b	#3,d0
+	beq.s	_brt_scsi
+;-- method 4: CMD_READ (32-bit byte offset; low32 only)
+	move.w	#CMD_READ,IO_Command(a0)
+	move.l	d4,IO_Offset(a0)
+	move.l	d5,IO_Length(a0)
+	move.l	a3,IO_Data(a0)
+	bra.s	_brt_doio
+_brt_nscmd:
+	move.w	#NSCMD_TD_READ64,IO_Command(a0)
+	move.l	d3,IO_Actual(a0)	;high 32
+	move.l	d4,IO_Offset(a0)	;low  32
+	move.l	d5,IO_Length(a0)
+	move.l	a3,IO_Data(a0)
+	bra.s	_brt_doio
+_brt_td64:
+	move.w	#TD_READ64,IO_Command(a0)
+	move.l	d3,IO_Actual(a0)	;high 32
+	move.l	d4,IO_Offset(a0)	;low  32
+	move.l	d5,IO_Length(a0)
+	move.l	a3,IO_Data(a0)
+	bra.s	_brt_doio
+_brt_scsi:
+	bsr	_brb_scsi10		;builds + issues READ(10)
+	bra.s	_brt_err
+_brt_doio:
 	move.l	a0,a1
 	jsr	DoIO(a6)
+_brt_err:
 	moveq.l	#0,d0
 	move.b	BC_DevIOReq+IO_Error(a4),d0
-	movem.l	(sp)+,d1-d2/a0/a1/a6
+	rts
+
+;-- _brb_scsi10: HD_SCSICMD READ(10). a0 = IOReq, d3=hi d4=lo (byte
+;   offset), d5=len, a3=dest, a6=ExecBase. SCSICmd + 10-byte CDB on stack.
+;   Preserves d3-d5/a0/a3 (caller's working values); clobbers d0-d1/a1-a2.
+_brb_scsi10:
+	movem.l	d0-d1/a1-a2,-(sp)
+	lea	-48(sp),sp		;scratch: SCSICmd(30) + CDB(10) + pad
+	move.l	sp,a2			;a2 = SCSICmd
+	lea	scsi_Sizeof(a2),a1	;a1 = CDB (after the struct)
+;-- zero the SCSICmd (esp. sense pointer/length -> no autosense write)
+	moveq.l	#0,d0
+	move.l	d0,0(a2)
+	move.l	d0,4(a2)
+	move.l	d0,8(a2)
+	move.l	d0,12(a2)
+	move.l	d0,16(a2)
+	move.l	d0,20(a2)
+	move.l	d0,24(a2)
+	move.l	d0,28(a2)
+;-- LBA = byte offset >> 9 (block-aligned); 32-bit reach is plenty
+	move.l	d4,d0
+	lsr.l	#8,d0
+	lsr.l	#1,d0			;d0 = low32 >> 9
+	move.l	d3,d1
+	lsl.l	#8,d1
+	lsl.l	#8,d1
+	lsl.l	#7,d1			;d1 = high32 << 23
+	or.l	d1,d0			;d0 = LBA (blocks)
+;-- length in blocks
+	move.l	d5,d1
+	lsr.l	#8,d1
+	lsr.l	#1,d1			;d1 = len >> 9
+;-- build the CDB
+	move.b	#$28,(a1)		;READ(10)
+	clr.b	1(a1)
+	move.b	d0,5(a1)		;LBA big-endian
+	lsr.l	#8,d0
+	move.b	d0,4(a1)
+	lsr.l	#8,d0
+	move.b	d0,3(a1)
+	lsr.l	#8,d0
+	move.b	d0,2(a1)
+	clr.b	6(a1)
+	move.b	d1,8(a1)		;length (blocks) big-endian
+	lsr.l	#8,d1
+	move.b	d1,7(a1)
+	clr.b	9(a1)
+;-- build the SCSICmd
+	move.l	a3,scsi_Data(a2)
+	move.l	d5,scsi_Length(a2)
+	move.l	a1,scsi_Command(a2)
+	move.w	#10,scsi_CmdLength(a2)
+	move.b	#SCSIF_READ,scsi_Flags(a2)
+;-- issue HD_SCSICMD (a0 still holds the IOReq)
+	move.w	#HD_SCSICMD,IO_Command(a0)
+	move.l	a2,IO_Data(a0)
+	move.l	#scsi_Sizeof,IO_Length(a0)
+	move.l	a0,a1
+	jsr	DoIO(a6)
+	lea	48(sp),sp		;free scratch
+	movem.l	(sp)+,d0-d1/a1-a2
 	rts
 
 ;===========================================================
@@ -579,265 +808,14 @@ _bcs_end:
 	tst.l	d0
 	rts
 
-;===========================================================
-; _bootScanRdb: find RDSK, run FS-load + partition-add phases.
-;===========================================================
-_bootScanRdb:
-;-- find the RDB in the first 16 blocks
-	moveq.l	#0,d6			;d6 = current block index
-_brdb_scan:
-	move.l	d6,d0
-	bsr	_bootReadBlock
-	tst.l	d0
-	bne.s	_brdb_next
-	move.l	BC_BlockBuf(a4),a0
-	cmpi.l	#RDSK_ID,(a0)
-	bne.s	_brdb_next
-	move.l	rdb_SummedLongs(a0),d1
-	cmp.l	#128,d1
-	bhi.s	_brdb_next
-	bsr	_bootChecksum
-	beq.s	_brdb_found
-_brdb_next:
-	addq.l	#1,d6
-	cmp.l	#RDB_LOCATION_LIMIT,d6
-	blo.w	_brdb_scan
-	ifd	DEBUG
-	lea	dbg_boot_no_rdb(pc),a0
-	bsr	_bootDebug
-	endc
-	rts
-
-_brdb_found:
-	ifd	DEBUG
-	lea	dbg_boot_rdsk_found(pc),a0
-	bsr	_bootDebug
-	endc
-	move.l	BC_BlockBuf(a4),a0
-	move.l	rdb_PartitionList(a0),d5	;d5 = partition list head
-	move.l	rdb_FileSysHeaderList(a0),d4	;d4 = fshd list head
-
-;-- Phase 1: add filesystems carried in RDB.  Hard cap at 16 hops
-;   so a corrupted multi-step fhb_Next cycle (A->B->A) cannot trap
-;   the cold-start path; the trivial 1-step self-loop is also
-;   caught by the cmp.l d3,d6 guard at the bottom of the loop.
-	move.l	d4,d3
-	moveq.l	#16,d2			;d2 = hop counter
-_brdb_fs_loop:
-	move.l	d3,d0
-	addq.l	#1,d0			;-1 -> 0 (end sentinel)
-	beq.w	_brdb_fs_done
-	subq.l	#1,d2			;walker hop counter
-	bmi.w	_brdb_fs_done
-	move.l	d3,d6
-	move.l	d3,d0
-	bsr	_bootReadBlock
-	tst.l	d0
-	bne.w	_brdb_fs_done
-	move.l	BC_BlockBuf(a4),a0
-	cmpi.l	#FSHD_ID,(a0)
-	bne.w	_brdb_fs_done
-	move.l	fhb_Next(a0),d3
-	bsr	_bootAddOneFileSys
-	cmp.l	d3,d6			;self-loop guard
-	beq.s	_brdb_fs_done
-	bra.w	_brdb_fs_loop
-_brdb_fs_done:
-
-;-- Phase 2: add partitions.  Hard cap at 128 hops (RDB allows up to
-;   ~127 partitions in practice); same rationale as the FSHD walker.
-	move.l	d5,d3
-	moveq.l	#127,d2			;d2 = hop counter (signed-fit moveq)
-_brdb_part_loop:
-	move.l	d3,d0
-	addq.l	#1,d0
-	beq.s	_brdb_pt_done
-	subq.l	#1,d2			;walker hop counter
-	bmi.s	_brdb_pt_done
-	move.l	d3,d6
-	move.l	d3,d0
-	bsr	_bootReadBlock
-	tst.l	d0
-	bne.s	_brdb_pt_done
-	move.l	BC_BlockBuf(a4),a0
-	cmpi.l	#PART_ID,(a0)
-	bne.s	_brdb_pt_done
-	move.l	pb_Next(a0),d3
-	bsr	_bootAddOnePartition
-	cmp.l	d3,d6
-	beq.s	_brdb_pt_done
-	bra.s	_brdb_part_loop
-_brdb_pt_done:
-	rts
-
-;===========================================================
-; _bootAddOnePartition
-;
-; Input:  BC_BlockBuf -> current PartitionBlock; a4 = &BootCtx
-; Output: nothing (registers a DeviceNode via expansion.library
-;         when partition is mountable).
-;===========================================================
-_bootAddOnePartition:
-	movem.l	d2-d7/a2/a5,-(sp)
-
-	move.l	BC_BlockBuf(a4),a2	;a2 = PartitionBlock
-	move.l	BC_ExecBase(a4),a6
-
-;-- NOMOUNT gate (pb_Flags bit PBFFB_NOMOUNT)
-	move.l	pb_Flags(a2),d0
-	btst	#PBFFB_NOMOUNT,d0
-	beq.s	_bap_mountable
-	ifd	DEBUG
-	lea	dbg_boot_part_skip(pc),a0
-	bsr	_bootDebug
-	move.l	BC_BlockBuf(a4),a0
-	lea	pb_DriveName(a0),a0	;raw RDB name (no DN blob yet)
-	bsr	_bootDebugBStr
-	endc
-	bra.w	_bap_end
-_bap_mountable:
-
-;-- The cached device-name BSTR is required for every FSSM; if the
-;   one-shot alloc in BootScanRDB failed there is no way to mount.
-	tst.l	BC_DevNameBSTR(a4)
-	beq.w	_bap_end
-
-;-- Validate DosEnvec TableSize before allocating the DN blob
-	move.l	pb_Environment(a2),d2	;d2 = envSize (TableSize)
-	cmp.l	#DE_DOSTYPE,d2		;need index 16 (DOSTYPE) in range
-	blo.w	_bap_end
-	cmp.l	#20,d2
-	bhi.w	_bap_end
-
-;-- Allocate DeviceNode blob (MEMF_REVERSE: high in RAM, away
-;   from low-heap fragmentation).  Layout:
-;     [  0..43 ] DeviceNode
-;     [ 44..59 ] FileSysStartupMsg
-;     [ 60..143] DosEnvec (TableSize <= 20 -> <= 84 bytes)
-;     [144..175] dn_Name BSTR
-	move.l	#DN_BLOB_SIZE,d0
-	move.l	#MEMF_PUBLIC+MEMF_CLEAR+MEMF_REVERSE,d1
-	jsr	AllocMem(a6)
-	tst.l	d0
-	beq.w	_bap_end
-	move.l	d0,d7			;d7 = DN byte addr
-	move.l	d7,a5			;a5 = DN
-
-;-- DeviceNode fields
-	move.l	#-1,36(a5)		;dn_GlobVec
-	move.l	#4000,20(a5)		;dn_StackSize
-	moveq.l	#5,d0
-	move.l	d0,24(a5)		;dn_Priority
-
-;-- pb_DriveName BSTR -> DN_BSTR_OFF (early-startup menu only
-;   renders the partition name from a BSTR inside the DN's own
-;   allocation; separate-pool BSTRs render blank).
-	lea	pb_DriveName(a2),a0
-	lea	DN_BSTR_OFF(a5),a1
-	moveq.l	#0,d3
-	move.b	(a0),d3
-	addq.l	#1,d3
-_bap_dn_cp:
-	move.b	(a0)+,(a1)+
-	subq.l	#1,d3
-	bne.s	_bap_dn_cp
-	lea	DN_BSTR_OFF(a5),a1
-	move.l	a1,d0
-	lsr.l	#2,d0			;BPTR
-	move.l	d0,40(a5)		;dn_Name
-
-;-- Uniquify the drive name against eb_MountList:
-;   append .1/.2/... when the name already exists, so two cards
-;   reusing RDB names don't clash in the early-startup menu).
-;   a4=&BootCtx, a5=DN blob.
-	bsr	_bootDedupName
-
-;-- FileSysStartupMsg at DN_FSSM_OFF (fields written directly
-;   from BootCtx + DN; no scratch packet involved).
-	lea	DN_FSSM_OFF(a5),a1
-	move.l	a1,d0
-	lsr.l	#2,d0
-	move.l	d0,28(a5)		;dn_Startup = BPTR(FSSM)
-	move.l	BC_Unit(a4),(a1)	;fssm_Unit
-	move.l	BC_DevNameBSTR(a4),4(a1) ;fssm_Device (cached BSTR)
-	lea	DN_ENVEC_OFF(a5),a0
-	move.l	a0,d0
-	lsr.l	#2,d0
-	move.l	d0,8(a1)		;fssm_Environ = BPTR(envec)
-
-;-- Copy DosEnvec straight from pb_Environment(a2) into the DN
-;   blob's envec slot (one pass, no packet round-trip).
-	lea	pb_Environment(a2),a1	;a1 = source (TableSize + entries)
-	move.l	d2,d3			;d2 = envSize (already validated)
-	addq.l	#1,d3			;count = TableSize + 1
-_bap_envec_cp:
-	move.l	(a1)+,(a0)+
-	subq.l	#1,d3
-	bne.s	_bap_envec_cp
-
-;-- Apply FileSysEntry patches BEFORE AddBootNode (FFS auto-attach
-;   in expansion.library otherwise replaces a custom handler such
-;   as PFS3 silently).
-	move.l	BC_ExecBase(a4),a6
-	move.l	pb_Environment+DE_DOSTYPE*4(a2),d0
-	bsr	_bootFindFSEntry
-	tst.l	d0
-	beq.s	_bap_fse_miss
-	move.l	d0,a1
-	move.l	d7,a0
-	bsr	_bootPatchDNfromFSE
-_bap_fse_miss:
-
-;-- Switch a6 back to expansion.library for the AddBootNode /
-;   AddDosNode call.
-	move.l	BC_ExpBase(a4),a6
-
-	move.l	pb_Flags(a2),d0
-	btst	#PBFFB_BOOTABLE,d0
-	beq.w	_bap_dosnode
-
-;---- AddBootNode
-	ifd	DEBUG
-	lea	dbg_boot_part_boot(pc),a0
-	bsr	_bootDebug
-	lea	DN_BSTR_OFF(a5),a0	;name as registered (post-dedup)
-	bsr	_bootDebugBStr
-	endc
-	move.l	pb_Environment+DE_BOOTPRI*4(a2),d0
-	moveq.l	#0,d1			;flags=0: no ADNF_STARTPROC
-	move.l	d7,a0
-	move.l	BC_ConfigDev(a4),a1	;synthetic ConfigDev
-	jsr	AddBootNode(a6)
-	move.b	#1,BC_HaveNodes(a4)
-	addq.b	#1,BC_PartCount(a4)
-
-	bra.s	_bap_end
-
-_bap_dosnode:
-	ifd	DEBUG
-	lea	dbg_boot_part_dos(pc),a0
-	bsr	_bootDebug
-	lea	DN_BSTR_OFF(a5),a0	;name as registered (post-dedup)
-	bsr	_bootDebugBStr
-	endc
-	move.l	pb_Environment+DE_BOOTPRI*4(a2),d0
-	moveq.l	#0,d1
-	move.l	d7,a0
-	jsr	AddDosNode(a6)
-	move.b	#1,BC_HaveNodes(a4)
-	addq.b	#1,BC_PartCount(a4)
-
-_bap_end:
-	movem.l	(sp)+,d2-d7/a2/a5
-	rts
 
 ;===========================================================
 ; _bootMakeExecBSTR: allocate and fill a BSTR copy of a
-; NUL-terminated C string for FSSM use.  ptable.library is
+; NUL-terminated C string for FSSM use. ptable.library is
 ; device-agnostic so the caller-supplied name has to be
 ; converted to a BSTR at runtime.
 ;
-; Called once per BootScanRDB invocation; the result is cached
+; Called once per BootScanPartitions invocation; the result is cached
 ; in BC_DevNameBSTR and shared across every partition's FSSM.
 ;
 ; Input : a0 = NUL-terminated C string, a4 = &BootCtx,
@@ -948,6 +926,111 @@ _bdn_dup:
 _bdn_unique:
 _bdn_ret:
 	movem.l	(sp)+,d0-d6/a0-a3
+	rts
+
+;===========================================================
+; _bootFindNode: find an existing DeviceNode by name on the same
+; eb_MountList that _bootDedupName walks (so it sees both cold- and
+; runtime-added cfd slot nodes). Used by _actMount to REUSE a persistent
+; slot node instead of adding a duplicate (which would .N-suffix).
+; In : a4 = &BootCtx (BC_ExpBase), a0 = wanted name BSTR
+; Out: d0 = DeviceNode ptr, or 0 if no node with that name exists
+; Preserves a4/a5/a6.
+;===========================================================
+_bootFindNode:
+	movem.l	d1/a0-a3,-(sp)
+	move.l	a0,a3			;a3 = wanted name BSTR
+	move.l	BC_ExpBase(a4),a1
+	move.l	a1,d0
+	beq.s	_bfn_no			;no exp.lib
+	lea	74(a1),a0
+	move.l	(a0),a1			;a1 = first BootNode (lh_Head)
+_bfn_walk:
+	move.l	(a1),d0			;ln_Succ
+	beq.s	_bfn_no			;tail -> not found
+	move.l	16(a1),d1		;d1 = bn_DeviceNode
+	beq.s	_bfn_next
+	move.l	d1,a2
+	move.l	40(a2),d0		;dn_Name (BPTR)
+	beq.s	_bfn_next
+	lsl.l	#2,d0
+	move.l	d0,a0			;a0 = existing name BSTR (arg A)
+	move.l	a3,a2			;a2 = wanted name BSTR (arg B)
+	bsr	_bootBStrEqualCI	;Z = equal; preserves a0/a2/d1-d3
+	bne.s	_bfn_next		;name differs -> next
+;-- name matches: reuse only if this node's FileSysStartupMsg is OUR
+;   device+unit; a foreign same-named device (e.g. scsi.device SDH0)
+;   must not be aliased, so keep walking past it.
+	move.l	d1,a2			;a2 = matched DeviceNode
+	move.l	28(a2),d0		;dn_Startup (BPTR FSSM)
+	beq.s	_bfn_next		;no startup -> not ours
+	lsl.l	#2,d0
+	move.l	d0,a2			;a2 = FSSM
+	move.l	BC_Unit(a4),d0
+	cmp.l	(a2),d0			;fssm_Unit
+	bne.s	_bfn_next
+	move.l	4(a2),d0		;fssm_Device (BPTR BSTR)
+	beq.s	_bfn_next
+	lsl.l	#2,d0
+	move.l	d0,a0			;a0 = node device BSTR (arg A)
+	move.l	BC_DevNameBSTR(a4),a2	;a2 = our device BSTR (arg B)
+	bsr	_bootBStrEqualCI	;Z = equal; preserves a0/a2/d1-d3
+	bne.s	_bfn_next		;foreign device -> skip
+	bra.s	_bfn_hit		;owned match -> reuse
+_bfn_next:
+	move.l	(a1),a1			;a1 = ln_Succ
+	bra.s	_bfn_walk
+_bfn_hit:
+	move.l	d1,d0			;d0 = DeviceNode
+	bra.s	_bfn_done
+_bfn_no:
+	moveq.l	#0,d0
+_bfn_done:
+	movem.l	(sp)+,d1/a0-a3
+	rts
+
+;===========================================================
+; _bootUnlinkBootNode: drop the eb_MountList BootNode that points at a
+; given DeviceNode. Cold-boot mounts register via AddBootNode, which links
+; a BootNode onto expansion.library's eb_MountList; teardown frees the DN
+; blob (the dn_Name BSTR lives inside it), so the BootNode must be unlinked
+; first or its stale bn_DeviceNode->dn_Name faults the next list walk
+; (_bootFindNode/_bootDedupName and expansion's own AddDosNode).
+; The BootNode struct itself is NOT freed (expansion-allocated, size not
+; reliably known); the leak is one-time and bounded - only the single
+; cold-boot BootNode ever exists, since re-mounts use AddDosNode which adds
+; nothing to eb_MountList.
+; In : a4 = &BootCtx (BC_ExpBase), d0 = DeviceNode to unlink, a5 = ExecBase
+; Out: d0 = 1 the list was checked (node removed or not present),
+;      d0 = 0 BC_ExpBase missing -> caller must NOT free the DN blob
+;      (a dangling bn_DeviceNode is worse than a bounded leak).
+; Preserves d1-d7/a0-a6.
+;===========================================================
+_bootUnlinkBootNode:
+	movem.l	d1/a0-a3/a6,-(sp)
+	move.l	d0,d1			;d1 = target DeviceNode
+	beq.s	_bubn_ok		;nothing to unlink -> fine
+	move.l	BC_ExpBase(a4),a3	;a3 = ExpansionBase
+	move.l	a3,d0
+	beq.s	_bubn_ret		;no exp.lib -> d0 = 0
+	move.l	a5,a6
+	jsr	Forbid(a6)
+	move.l	74(a3),a1		;a1 = eb_MountList lh_Head (first BootNode)
+_bubn_walk:
+	move.l	(a1),d0			;ln_Succ
+	beq.s	_bubn_perm		;tail sentinel -> not found
+	cmp.l	16(a1),d1		;bn_DeviceNode == target?
+	beq.s	_bubn_hit
+	move.l	(a1),a1			;a1 = ln_Succ
+	bra.s	_bubn_walk
+_bubn_hit:
+	jsr	Remove(a6)		;a1 = the BootNode
+_bubn_perm:
+	jsr	Permit(a6)
+_bubn_ok:
+	moveq.l	#1,d0
+_bubn_ret:
+	movem.l	(sp)+,d1/a0-a3/a6
 	rts
 
 ;===========================================================
@@ -1062,8 +1145,8 @@ _bse_ne:
 
 ;===========================================================
 ; Debug helpers (only assembled in DEBUG builds).
-; All callable from BootScanRDB context (a4 = &BootCtx,
-; a5 = ExecBase).  Use (_AbsExecBase).w so they remain
+; All callable from BootScanPartitions context (a4 = &BootCtx,
+; a5 = ExecBase). Use (_AbsExecBase).w so they remain
 ; callable even when a6 has been temporarily clobbered.
 ;===========================================================
 	ifd	DEBUG
@@ -1199,4 +1282,95 @@ _bdbs_nl:
 	jsr	RawPutChar(a6)
 	movem.l	(sp)+,d0/d3/a0/a6
 	rts
+
+;-- Print a BSTR (length byte + chars), NO trailing CR/LF, so a name can
+;   be followed by more text on the same line. a0 = BSTR, clamp 31.
+_bootDebugBStrR:
+	movem.l	d0/d3/a0/a6,-(sp)
+	move.l	(_AbsExecBase).w,a6
+	moveq.l	#0,d3
+	move.b	(a0)+,d3
+	cmp.w	#31,d3
+	bls.s	_bdsr_ok
+	moveq.l	#31,d3
+_bdsr_ok:
+	subq.l	#1,d3
+	bmi.s	_bdsr_end
+_bdsr_lp:
+	moveq.l	#0,d0
+	move.b	(a0)+,d0
+	jsr	RawPutChar(a6)
+	dbra	d3,_bdsr_lp
+_bdsr_end:
+	movem.l	(sp)+,d0/d3/a0/a6
+	rts
+
+;-- Print d0.l as unsigned decimal (full 32-bit), no CR/LF. Two divu
+;   steps give a full 32-bit quotient; digits are stacked then emitted.
+_bootDebugDec32:
+	movem.l	d0-d5/a0/a6,-(sp)
+	move.l	(_AbsExecBase).w,a6
+	move.l	sp,a0			;digit-stack marker
+	tst.l	d0
+	bne.s	_bdd_loop
+	moveq.l	#'0',d0
+	jsr	RawPutChar(a6)
+	bra.s	_bdd_done
+_bdd_loop:
+	move.l	d0,d1
+	swap	d1
+	and.l	#$0000ffff,d1
+	divu	#10,d1			;quot_hi / rem_hi
+	move.w	d1,d2			;quot_hi
+	swap	d1
+	move.w	d1,d3			;rem_hi
+	moveq.l	#0,d1
+	move.w	d3,d1
+	swap	d1
+	move.w	d0,d1			;rem_hi<<16 | low word
+	divu	#10,d1			;quot_lo / remainder
+	move.w	d1,d4			;quot_lo
+	swap	d1
+	move.w	d1,d5			;remainder 0..9
+	move.w	d2,d0
+	swap	d0
+	move.w	d4,d0			;new quotient
+	add.b	#'0',d5
+	move.b	d5,-(sp)
+	tst.l	d0
+	bne.s	_bdd_loop
+_bdd_emit:
+	cmp.l	sp,a0
+	beq.s	_bdd_done
+	moveq.l	#0,d0
+	move.b	(sp)+,d0
+	jsr	RawPutChar(a6)
+	bra.s	_bdd_emit
+_bdd_done:
+	movem.l	(sp)+,d0-d5/a0/a6
+	rts
+
+;-- Print " (<dostype>, <MB> MB)" + CR/LF for the PartEntry in a3.
+;   MB = pe_BlockCount >> 11 (512-byte sectors -> MiB).
+_bootDebugPartTail:
+	movem.l	d0/a0,-(sp)
+	lea	s_pt_lparen(pc),a0
+	bsr	_bootDebug
+	move.l	pe_DosType(a3),d0
+	bsr	_bootDebugDosType
+	lea	s_pt_comma(pc),a0
+	bsr	_bootDebug
+	move.l	pe_BlockCount(a3),d0
+	lsr.l	#8,d0
+	lsr.l	#3,d0
+	bsr	_bootDebugDec32
+	lea	s_pt_mbnl(pc),a0
+	bsr	_bootDebug
+	movem.l	(sp)+,d0/a0
+	rts
+
+s_pt_lparen:	dc.b	" (",0
+s_pt_comma:	dc.b	", ",0
+s_pt_mbnl:	dc.b	" MB)",CR,LF,0
+	even
 	endc	;DEBUG

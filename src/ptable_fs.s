@@ -1,5 +1,5 @@
 ;===========================================================
-; ptable_fs.s -- FileSystem.resource open/create/insert + FSE
+; ptable_fs.s - FileSystem.resource open/create/insert + FSE
 ; build helpers.
 ;===========================================================
 
@@ -9,7 +9,7 @@
 ;
 ; Reads the LSEG chain, concatenates the payload, then either
 ; relocates HUNK images via _bootRelocateHunks or wraps a
-; pre-linked blob as a single-hunk SegList.  Builds a
+; pre-linked blob as a single-hunk SegList. Builds a
 ; FileSysEntry and inserts it into FileSys.resource.
 ;===========================================================
 _bootAddOneFileSys:
@@ -158,6 +158,15 @@ _bao_fse_build:
 
 	move.l	fhb_Version(a3),fse_Version(a0)
 	move.l	fhb_PatchFlags(a3),d5
+;-- an RDB GlobalVec patch that is not -1/-2 would guru any C handler:
+;   publish the entry with the GlobalVec patch bit cleared (the raw
+;   value stays in fse_GlobalVec below for diagnostics)
+	move.l	fhb_GlobalVec(a3),d0
+	addq.l	#2,d0			;-2 -> 0, -1 -> 1, BCPL values -> >= 2
+	cmp.l	#2,d0
+	bcs.s	_bao_gv_ok		;unsigned < 2 -> non-BCPL, keep bit 8
+	bclr	#8,d5
+_bao_gv_ok:
 	move.l	d5,fse_PatchFlags(a0)
 	move.l	fhb_Type(a3),fse_Type(a0)
 	move.l	fhb_Task(a3),fse_Task(a0)
@@ -209,9 +218,9 @@ _bao_end:
 
 ;===========================================================
 ; _bootFSName: derive a display name for a loaded FS handler by
-; scanning its SegList.  Pass A: first self-validating ROMTAG
+; scanning its SegList. Pass A: first self-validating ROMTAG
 ; ($4AFC with RT_MATCHTAG == its own address) -> RT_IDSTRING, else
-; RT_NAME.  Pass B (if no ROMTAG): first "$VER:" cookie.  Else 0.
+; RT_NAME. Pass B (if no ROMTAG): first "$VER:" cookie. Else 0.
 ; Input:  d0 = SegList (BPTR)
 ; Output: d0 = APTR to a NUL-terminated name, or 0 (unnamed).
 ; Returned pointers alias into the SegList, which outlives the FSE.
@@ -328,6 +337,42 @@ _bff_end:
 	rts
 
 ;===========================================================
+; _bootFindFSFamily: look up a FileSysEntry by dostype FAMILY (high 3 bytes,
+; any low byte). The FAT filesystem is shareable - one handler serves every
+; FAT partition and may be registered under any FAT dostype - so a partition
+; whose exact dostype is not registered binds the family handler instead.
+; Input:  d0 = DosType (low byte ignored)
+; Output: d0 = entry pointer or 0.
+;===========================================================
+_bootFindFSFamily:
+	movem.l	d2/a2,-(sp)
+	move.l	d0,d2
+	and.l	#$FFFFFF00,d2		;match on high 3 bytes only
+	bsr	_bootGetFSResource
+	tst.l	d0
+	beq.s	_bft_none
+	move.l	d0,a0
+	lea	fsr_FileSysEntries(a0),a0
+	move.l	(a0),a2
+_bft_loop:
+	move.l	(a2),d0
+	beq.s	_bft_none
+	move.l	fse_DosType(a2),d1
+	and.l	#$FFFFFF00,d1
+	cmp.l	d1,d2
+	beq.s	_bft_hit
+	move.l	d0,a2
+	bra.s	_bft_loop
+_bft_hit:
+	move.l	a2,d0
+	bra.s	_bft_end
+_bft_none:
+	moveq.l	#0,d0
+_bft_end:
+	movem.l	(sp)+,d2/a2
+	rts
+
+;===========================================================
 ; _bootPatchDNfromFSE: apply FSE patches to a DeviceNode
 ; eagerly, BEFORE AddBootNode (otherwise AddBootNode's empty-DN
 ; auto-attach silently replaces a custom handler).
@@ -368,6 +413,14 @@ _pdf_no_pri:
 _pdf_no_seg:
 	btst	#8,d1
 	beq.s	_pdf_no_gv
+;-- bit 8 (GlobalVec): honour only non-BCPL values (-1/-2). An RDB
+;   authored with GlobalVec 0 would make DOS build a BCPL global
+;   vector for a C handler -> guru at CreateProc. Anything else
+;   keeps the builder's -1 default.
+	move.l	fse_GlobalVec(a1),d0
+	addq.l	#2,d0			;-2 -> 0, -1 -> 1, BCPL values -> >= 2
+	cmp.l	#2,d0
+	bcc.s	_pdf_no_gv		;unsigned >= 2 -> reject, keep -1
 	move.l	fse_GlobalVec(a1),dn_GlobVec(a0)
 _pdf_no_gv:
 	rts
@@ -395,7 +448,7 @@ _bie_end:
 
 ;===========================================================
 ; _bootGetFSResource: OpenResource(FileSystem.resource); if it
-; does not exist yet, allocate + AddResource.  Cache in
+; does not exist yet, allocate + AddResource. Cache in
 ; BC_FSResource.
 ; Output: d0 = resource pointer (or 0 on alloc failure)
 ;===========================================================

@@ -8,7 +8,7 @@
 ;
 ; This library is distributed in the hope that it will be useful,
 ; but WITHOUT ANY WARRANTY; without even the implied warranty of
-; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 ; Lesser General Public License for more details.
 ;
 ; You should have received a copy of the GNU Lesser General Public
@@ -73,6 +73,10 @@ OpenResource	= -498
 OpenLibrary	= -552
 RawPutChar	= -516
 AddResource	= -486
+InitSemaphore	= -558
+ObtainSemaphore	= -564
+ReleaseSemaphore = -570
+AttemptSemaphore = -576
 CacheClearU	= -636
 
 ;struct Node
@@ -95,6 +99,7 @@ MP_SigBit	= 15
 MP_SigTask	= 16
 MP_MsgList	= 20
 MP_Sizeof	= 34
+PA_IGNORE	= 2			;mp_Flags: PutMsg enqueues, signals nobody
 
 ;struct Message
 MN_ReplyPort	= 14
@@ -140,7 +145,21 @@ IO_Offset	= 44
 IO_Sizeof	= 56
 
 TD_CHANGESTATE	= 14
+CMD_READ	= 2
+TD_READ64	= 24
+HD_SCSICMD	= 28
 NSCMD_TD_READ64	= $c000
+IOERR_NOCMD	= -3
+
+;struct SCSICmd (HD_SCSICMD payload)
+scsi_Data	= 0
+scsi_Length	= 4
+scsi_Command	= 12
+scsi_CmdLength	= 16
+scsi_Flags	= 20
+scsi_Status	= 21
+scsi_Sizeof	= 30
+SCSIF_READ	= 2
 
 ;CR/LF for debug strings
 CR		= 13
@@ -200,7 +219,12 @@ s_functable:
 	dc.w	Close-s_functable
 	dc.w	Expunge-s_functable
 	dc.w	Null-s_functable	;reserved
-	dc.w	BootScanRDB-s_functable
+	dc.w	BootScanPartitions-s_functable
+	dc.w	ScanPartitions-s_functable
+	dc.w	MountPartitions-s_functable
+	dc.w	UnmountPartitions-s_functable
+	dc.w	RegisterPartition-s_functable
+	dc.w	MarkAbsent-s_functable
 	dc.w	-1
 
 ;--- s_initfunc: called by Exec.MakeLibrary scaffolding ----
@@ -272,15 +296,19 @@ Null:
 	rts
 
 ;===========================================================
-; Boot-time bodies (BootScanRDB and helpers)
+; Boot-time bodies (BootScanPartitions and helpers)
 ;
 ; All in a single source so the static branches below stay
 ; in range.
 ;===========================================================
 
-	include	"ptable_boot.s"
-	include	"ptable_fs.s"
-	include	"ptable_hunk.s"
+	include	"ptable_boot.s"		;BootScanPartitions + ctx/IO + shared equates
+	include	"ptable_fs.s"		;FileSystem.resource (FSHD load/find)
+	include	"ptable_hunk.s"		;mini hunk relocator
+	include	"parts.s"		;MBR/GPT walkers + boot-block check
+	include	"ptable_scan.s"		;detection + publish stage
+	include	"ptable_act.s"		;register / mount / unmount acts
+	include	"ptable_partres.s"	;partition.resource + runtime LVOs
 	include	"ptable_dosdiag.i"
 
 	cnop	0,4
