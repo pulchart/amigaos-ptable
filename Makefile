@@ -1,5 +1,30 @@
+VERSION = 20260710-dev
+DATE = 10.07.2026
+
+PLIB_MAJOR = 2
+PLIB_MINOR = 0
+PLIB_VERSION_SUFFIX = -dev
+PLIB_DATE  = 10.07.2026
+PLIB_VERSION = $(PLIB_MAJOR).$(PLIB_MINOR)$(PLIB_VERSION_SUFFIX)
+
+LSPTRES_MAJOR = 1
+LSPTRES_MINOR = 0
+LSPTRES_VERSION_SUFFIX = -dev
+LSPTRES_DATE = 10.07.2026
+LSPTRES_VERSION = $(LSPTRES_MAJOR).$(LSPTRES_MINOR)$(LSPTRES_VERSION_SUFFIX)
+
+PLIB_NAME    = ptable.library
+LSPTRES_NAME = lsptres
+COMPONENTS   = PLIB LSPTRES
+COMPONENT_ARGS = $(foreach c,$(COMPONENTS),'$(c)|$($(c)_NAME)|$($(c)_VERSION)|$($(c)_DATE)')
+
 VASM_HOME ?= /opt/vasm
 VASM       = $(VASM_HOME)/bin/vasmm68k_mot
+
+VBCC_HOME ?= /opt/vbcc
+VBCC       = $(VBCC_HOME)/bin/vc
+NDK       ?= NDK
+MD2GUIDE  ?= ../cfd/tools/md2guide.py
 
 ifeq ($(V),1)
   Q =
@@ -11,15 +36,10 @@ endif
 
 VASMFLAGS  = -Fhunkexe -nosym $(DEFINITIONS)
 
-PLIB_MAJOR = 2
-PLIB_MINOR = 0
-PLIB_VERSION_SUFFIX = -dev
-PLIB_DATE  = 22.06.2026
-PLIB_VERSION = $(PLIB_MAJOR).$(PLIB_MINOR)$(PLIB_VERSION_SUFFIX)
-
 SRC        = src
 LIB_SOURCE = $(SRC)/ptable_lib.s
 LIB_DEPS   = $(SRC)/ptable_boot.s $(SRC)/ptable_fs.s $(SRC)/ptable_hunk.s \
+             $(SRC)/ptable_scan.s $(SRC)/ptable_act.s \
              $(SRC)/ptable_partres.s $(SRC)/parts.s $(SRC)/parts.i \
              $(SRC)/ptable_pub.i $(SRC)/ptable_dosdiag.i \
              $(SRC)/umul32.i $(SRC)/log2.i $(SRC)/raw_debug.i
@@ -33,8 +53,28 @@ DBG_small =
 FLAVORS = full/68020 full/68000 small/68020 small/68000
 TARGETS = $(foreach f,$(FLAVORS),dist/$(f)/ptable.library)
 
-.PHONY: all clean
-all: $(TARGETS) dist/ptable.version
+# Release (Aminet LHA + .readme generated from dist.readme.in)
+LHA         ?= lha
+RELEASE_NAME = ptable.v$(VERSION)
+ARCHIVE_NAME = $(RELEASE_NAME).lha
+README_NAME  = $(RELEASE_NAME).readme
+README_TEMPLATE = dist.readme.in
+
+COMPONENT_VERSIONS_NL = $(shell sh tools/components.sh plain $(COMPONENT_ARGS))
+
+.PHONY: all clean distclean lsptres guide guides version-readme readme release check-lha
+all: $(TARGETS) dist/ptable.version dist/lsptres.version dist/c/lsptres
+
+# Rewrite the topmost release-notes header and the COMPONENTS block in
+# docs/changes.md from current Makefile vars. Add new release headers by hand.
+version-readme:
+	$(Q)sed -i '0,/^## [0-9]\{8\}[^[:space:]]*/s/^## [0-9]\{8\}[^[:space:]]*/## $(VERSION)/' docs/changes.md
+	$(Q)block="_Components in this release_:\n\n$$(sh tools/components.sh md $(COMPONENT_ARGS))"; \
+	awk -v block="$$block" ' \
+	    /<!-- COMPONENTS:BEGIN -->/{print; print block; in_block=1; next} \
+	    /<!-- COMPONENTS:END -->/{in_block=0} \
+	    !in_block' docs/changes.md > docs/changes.md.tmp && mv docs/changes.md.tmp docs/changes.md
+	$(Q)echo "  CHANGES topmost header + components updated to $(VERSION) ($(DATE))"
 
 $(VERSION_INC):
 	$(Q)echo "  VERSION ptable.library $(PLIB_VERSION)"
@@ -61,5 +101,99 @@ dist/ptable.version: $(VERSION_INC)
 	$(Q)mkdir -p dist
 	$(Q)echo "$(PLIB_VERSION) $(PLIB_DATE)" > $@
 
+# lsptres version stamp for cfd/fat95 component lists.
+dist/lsptres.version: Makefile
+	$(Q)mkdir -p dist
+	$(Q)echo "$(LSPTRES_VERSION) $(LSPTRES_DATE)" > $@
+
+lsptres: dist/c/lsptres
+dist/c/lsptres: $(SRC)/lsptres.c
+	$(Q)mkdir -p $(@D)
+	$(Q)echo "  VBCC    $@"
+	$(Q)VBCC=$(VBCC_HOME) PATH=$(VBCC_HOME)/bin:$$PATH $(VBCC) +aos68k -O2 -c99 -I$(NDK)/Include_H -DVERSION='"$(LSPTRES_VERSION)"' -DDATE='"$(LSPTRES_DATE)"' -o $@ $<
+	$(Q)echo "          $$(stat -c%s $@) bytes, md5:$$(md5sum $@ | cut -c1-8)"
+
+guide guides: dist/docs/lsptres.guide dist/docs/ptable.guide dist/docs/changes.guide
+dist/docs/changes.guide: docs/changes.md
+	$(Q)mkdir -p $(@D)
+	$(Q)echo "  GUIDE   $@"
+	$(Q)python3 $(MD2GUIDE) docs/changes.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library release notes" --ver-title "ptable.library release notes guide"
+
+dist/docs/lsptres.guide: docs/lsptres.md
+	$(Q)mkdir -p $(@D)
+	$(Q)echo "  GUIDE   $@"
+	$(Q)python3 $(MD2GUIDE) docs/lsptres.md $@ --version $(LSPTRES_VERSION) --date $(LSPTRES_DATE) --title "lsptres" --ver-title "lsptres guide"
+
+dist/docs/ptable.guide: docs/ptable.md
+	$(Q)mkdir -p $(@D)
+	$(Q)echo "  GUIDE   $@"
+	$(Q)python3 $(MD2GUIDE) docs/ptable.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library" --ver-title "ptable.library guide"
+
+# ============================================================
+# Release targets
+# ============================================================
+
+readme: $(README_NAME)
+
+# Generate the Aminet .readme from the template: resolve @VERSION@/@DATE@,
+# the components list, and a checksum block over every shipped artifact.
+$(README_NAME): $(README_TEMPLATE) $(TARGETS) dist/c/lsptres
+	@echo "Generating $(README_NAME) from template..."
+	@checksums=""; \
+	for f in $(FLAVORS); do \
+		t="dist/$$f/ptable.library"; \
+		[ -f "$$t" ] || continue; \
+		sz=$$(stat -c%s "$$t"); \
+		checksums="$$checksums""ptable.library $(PLIB_VERSION) ($(PLIB_DATE)) [$$f] ($$sz bytes):\n  MD5:    $$(md5sum "$$t" | cut -d' ' -f1)\n  SHA256: $$(sha256sum "$$t" | cut -d' ' -f1)\n\n"; \
+	done; \
+	if [ -f dist/c/lsptres ]; then \
+		sz=$$(stat -c%s dist/c/lsptres); \
+		checksums="$$checksums""lsptres $(LSPTRES_VERSION) ($(LSPTRES_DATE)) ($$sz bytes):\n  MD5:    $$(md5sum dist/c/lsptres | cut -d' ' -f1)\n  SHA256: $$(sha256sum dist/c/lsptres | cut -d' ' -f1)\n\n"; \
+	fi; \
+	sed -e "s|@VERSION@|$(VERSION)|g" \
+	    -e "s|@DATE@|$(DATE)|g" \
+	    -e "s|@COMPONENT_VERSIONS@|$(COMPONENT_VERSIONS_NL)|" \
+	    -e "s|@TOOL_CHECKSUMS@|$$checksums|" \
+	    $(README_TEMPLATE) > $(README_NAME)
+	@echo "Generated: $(README_NAME)"
+
+# Create the Aminet-compatible LHA release (archive + readme).
+release: check-lha version-readme all guides readme
+	@echo "Creating Aminet release: $(ARCHIVE_NAME)"
+	$(eval STAGING := $(shell mktemp -d))
+	@for f in $(FLAVORS); do \
+		mkdir -p "$(STAGING)/ptable/$$f/libs"; \
+		cp "dist/$$f/ptable.library" "$(STAGING)/ptable/$$f/libs/"; \
+	done
+	@mkdir -p "$(STAGING)/ptable/c" "$(STAGING)/ptable/docs" "$(STAGING)/ptable/src"
+	@cp dist/c/lsptres "$(STAGING)/ptable/c/"
+	@cp dist/docs/*.guide "$(STAGING)/ptable/docs/"
+	@cp src/* "$(STAGING)/ptable/src/"
+	@cp LICENSE "$(STAGING)/ptable/"
+	@cp $(README_NAME) "$(STAGING)/ptable/ptable.readme"
+	@cd "$(STAGING)" && $(LHA) c "$(ARCHIVE_NAME)" ptable >/dev/null
+	@mv "$(STAGING)/$(ARCHIVE_NAME)" .
+	@rm -rf "$(STAGING)"
+	@echo "=================================="
+	@echo "Created: $(ARCHIVE_NAME)"
+	@ls -lh "$(ARCHIVE_NAME)"
+	@echo ""
+	@echo "Contents:"
+	@$(LHA) l "$(ARCHIVE_NAME)"
+	@echo ""
+	@echo "For Aminet upload:"
+	@echo "  1. $(ARCHIVE_NAME)"
+	@echo "  2. $(README_NAME)"
+
+check-lha:
+	@command -v $(LHA) >/dev/null 2>&1 || { \
+		echo "ERROR: lha command not found!"; \
+		echo "Install with: sudo dnf install lha"; \
+		exit 1; \
+	}
+
 clean:
 	$(Q)rm -rf dist $(VERSION_INC)
+
+distclean: clean
+	$(Q)rm -f ptable*.lha ptable*.readme

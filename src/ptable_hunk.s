@@ -1,9 +1,9 @@
 ;===========================================================
-; ptable_hunk.s -- mini LoadSeg for cold-start use.
+; ptable_hunk.s - mini LoadSeg for cold-start use.
 ;
 ; Converts a concatenated HUNK executable (as found in the
 ; LSEG chain of an RDB FileSysHeader) into a relocated, chained
-; SegList suitable for fse_SegList.  Runs before dos.library
+; SegList suitable for fse_SegList. Runs before dos.library
 ; is initialised so InternalLoadSeg is not callable.
 ;
 ; Supported hunk ids:

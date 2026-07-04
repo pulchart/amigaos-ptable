@@ -1,5 +1,5 @@
 ;===========================================================
-; umul32.i -- 32-bit unsigned multiply
+; umul32.i - 32-bit unsigned multiply
 ;
 ; Macro UMUL32: d0 = d0 * d1 (u32).
 ; Inlines mulu.l on 68020+; calls UMul32 on 68000.

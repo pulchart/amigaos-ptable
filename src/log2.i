@@ -1,5 +1,5 @@
 ;===========================================================
-; log2.i -- floor(log2(d0)) for d0 != 0
+; log2.i - floor(log2(d0)) for d0 != 0
 ;
 ; Macro LOG2: d0 = floor(log2(d0)), d0 != 0.
 ; Inlines bfffo on 68020+; calls Log2 on 68000.
