@@ -317,6 +317,8 @@ dbg_boot_nl:
 	dc.b	CR,LF,0
 dbg_boot_skip_tail:
 	dc.b	" (no-mount)",CR,LF,0
+dbg_boot_skip_src:
+	dc.b	" (not RDB: mounted at DOS time)",CR,LF,0
 dbg_hunk_badid:
 	dc.b	"[PT] hunk: bad id $",0
 	endc
@@ -336,7 +338,9 @@ dbg_hunk_badid:
 ;
 ; Cold stage of the unified pipeline: publish every partition
 ; (RDB/MBR/GPT/flat) into partition.resource, then cold-register
-; the mountable ones (AddBootNode / AddDosNode flags=0).
+; the mountable RDB ones (AddBootNode / AddDosNode flags=0).
+; MBR/GPT/flat entries are published only; DOS has not started, so
+; cfd.prefs cannot be read here.
 ;
 ; Preserves d2-d7/a2-a5/a6
 ;===========================================================

@@ -8,7 +8,7 @@ You do not run `ptable.library`; other components open it. This document explain
 
 `ptable.library` has two jobs, used at two different times.
 
-- **Cold-boot RDB autoboot.** At Kickstart cold start, before DOS exists, the `compactflash.dosboot` module calls `BootScanPartitions`. The library walks the RDB on the card, loads any filesystem handlers stored in the RDB into `FileSystem.resource`, and registers each partition: bootable ones via `AddBootNode` (they appear in the Early Startup boot menu), mountable-only ones via `AddDosNode`. This is what lets you boot directly from an RDB-partitioned card in the PCMCIA slot.
+- **Cold-boot RDB autoboot.** At Kickstart cold start, before DOS exists, the `compactflash.dosboot` module calls `BootScanPartitions`. The library scans the card (RDB, MBR, GPT, flat) and publishes every partition into `partition.resource`, loads any filesystem handlers stored in the RDB into `FileSystem.resource`, and registers the RDB partitions: bootable ones via `AddBootNode` (they appear in the Early Startup boot menu), mountable-only ones via `AddDosNode`. This is what lets you boot directly from an RDB-partitioned card in the PCMCIA slot. MBR, GPT and flat partitions are published but not registered here: DOS does not exist yet, so their mount configuration cannot be read. The DOS-time automount mounts them.
 
 - **DOS-time scan and automount.** When a card is hotplugged after the machine is up, the consumer calls `ScanPartitions` to publish the card's partitions into `partition.resource`, then `MountPartitions` to mount them. On removal it calls `MarkAbsent` (keep the handler) or `UnmountPartitions` (unmount and remove). This is what automounts FAT cards. In `compactflash.device` automount is on by default; `AUTOMOUNT 0` in `cfd.prefs` turns it off. `ScanPartitions` runs the same scanner the cold path uses (RDB, MBR, GPT, flat). Partitions already published (the cold-boot card, or a previous scan of the same card) are skipped one by one, so nothing is published twice.
 
@@ -18,16 +18,18 @@ One parser serves all three readers: the driver, the FAT handler, and the lister
 
 The four use cases, shown as the LVO calls each one drives. They all end at `partition.resource`, the shared registry.
 
-**Cold-boot RDB autoboot.** The `compactflash.dosboot` cold stub calls `BootScanPartitions`; bootable RDB partitions become boot-menu entries, the rest mountable volumes.
+**Cold-boot RDB autoboot.** The `compactflash.dosboot` cold stub calls `BootScanPartitions`; bootable RDB partitions become boot-menu entries, the other RDB partitions mountable volumes. MBR, GPT and flat partitions are published only.
 
 ```mermaid
 graph TD
   A[compactflash.dosboot] --> B[BootScanPartitions]
-  B --> C[scan RDB + load FS handlers]
-  C -->|bootable| D[AddBootNode]
-  C -->|mountable| E[AddDosNode]
+  B --> C[scan card + load FS handlers]
+  C -->|RDB bootable| D[AddBootNode]
+  C -->|RDB mountable| E[AddDosNode]
+  C -->|MBR/GPT/flat| G[published only]
   D --> F[partition.resource]
   E --> F
+  G --> F
 ```
 
 **Hotplug attach (DOS time).** A card insert wakes the consumer's mount worker, which publishes then mounts the card's partitions.
