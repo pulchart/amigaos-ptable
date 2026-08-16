@@ -254,7 +254,8 @@ _amt_no:
 	rts
 
 ;===========================================================
-; _actCold: cold-register every mountable entry for this unit.
+; _actCold: cold-register the mountable RDB entries for this unit. MBR/GPT/flat
+; entries stay published only; the DOS-time agent mounts them with cfd.prefs.
 ; In : a4 = &BootCtx (BC_ExpBase, BC_ConfigDev, BC_DevNameBSTR set),
 ;      a5 = ExecBase; PTR_Lock held
 ; Out: d0 = entries registered; BC_HaveNodes/BC_PartCount updated
@@ -277,7 +278,23 @@ _acd_walk:
 	beq.w	_acd_next
 	move.b	pe_Flags(a3),d3
 	btst	#PEB_NOMOUNT,d3
-	bne.w	_acd_skipdbg
+	beq.s	_acd_srcchk
+	ifd	DEBUG
+	lea	dbg_boot_skip_tail(pc),a0
+	move.l	a0,d5			;d5 = skip reason for _acd_skipdbg
+	endc
+	bra.w	_acd_skipdbg
+_acd_srcchk:
+;-- cold boot registers RDB only. MBR/GPT/flat entries stay published and are
+;   mounted by the DOS-time agent, which reads cfd.prefs.
+	cmpi.b	#PES_RDB,pe_Source(a3)
+	beq.s	_acd_mntchk
+	ifd	DEBUG
+	lea	dbg_boot_skip_src(pc),a0
+	move.l	a0,d5
+	endc
+	bra.w	_acd_skipdbg
+_acd_mntchk:
 	btst	#PEB_MOUNTED,d3
 	bne.w	_acd_next
 
@@ -335,7 +352,7 @@ _acd_skipdbg:
 	bsr	_bootDebug
 	lea	pe_NameB(a3),a0
 	bsr	_bootDebugBStrR
-	lea	dbg_boot_skip_tail(pc),a0
+	move.l	d5,a0			;skip reason set by the caller
 	bsr	_bootDebug
 	endc
 _acd_next:
