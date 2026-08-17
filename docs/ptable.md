@@ -123,7 +123,7 @@ The `full` build prints its progress to the serial port at 9600 baud. The librar
 [CFD] boot: BootScanPartitions(compactflash.device,0)
 [PT] cold boot: scanning for partitions
 [PT] RDB partition table
-[PT] partitions found: 5
+[PT] new partitions: 5
 [PT] - skip  SDH10 (no-mount)
 [PT] - skip  SDH11 (no-mount)
 [PT] + boot  SDH0 (PFS, 512 MB)
@@ -139,7 +139,7 @@ Five partitions are found; the two NOMOUNT entries are skipped, one bootable is 
 ```
 [PT] scanning for partitions
 [PT] GPT partition table
-[PT] partitions found: 3
+[PT] new partitions: 3
 [PT] mounting partitions
 [PT] mounted CFa0 (FAT, 2048 MB)
 [PT] mounted CFa1 (FAT, 4096 MB)
@@ -188,7 +188,7 @@ For consumers. Full struct field layout for `MountCfg`, `PartEntry`, and `partit
 
 ```
 BootScanPartitions(deviceName:a1, unit:d0)                 -30  cold-boot RDB scan + register
-ScanPartitions(deviceName:a1, unit:d0)                     -36  publish RDB/MBR/GPT/flat -> partition.resource
+ScanPartitions(deviceName:a1, unit:d0)                     -36  publish RDB/MBR/GPT/flat -> partition.resource (d0 = newly published)
 MountPartitions(deviceName:a1, unit:d0, cfg:a0)            -42  AddDosNode(ADNF_STARTPROC) the entries
 UnmountPartitions(deviceName:a1, unit:d0, prefixList:a0)   -48  ACTION_DIE + RemDosEntry + free (prefixList=0: all; else by dostype, rest kept)
 RegisterPartition(deviceName:a1, unit:d0, ...)            -54  overlay a handler's real DOS name/flags onto an entry

@@ -16,7 +16,7 @@
 ;   AddDosNode(flags=0). System-Startup starts the handlers (steps 3-8).
 ;   Adds the synthetic ConfigDev (boot menu) when anything was registered.
 ;
-; ScanPartitions(deviceName: a1, unit: d0)   -> d0 = partitions published
+; ScanPartitions(deviceName: a1, unit: d0)   -> d0 = partitions newly published
 ;   Publish only, no mounting. Exec-only; callable from any task context.
 ;
 ; MountPartitions(deviceName: a1, unit: d0, cfg: a0)  -> d0 = partitions mounted
