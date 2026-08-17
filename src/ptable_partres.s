@@ -25,7 +25,7 @@ dbg_pt_scan:
 dbg_pt_open:
 	dc.b	"[PT] cannot open device (no media?)",CR,LF,0
 dbg_pt_recs:
-	dc.b	"[PT] partitions found: ",0
+	dc.b	"[PT] new partitions: ",0
 dbg_pt_mbr:
 	dc.b	"[PT] MBR partition table",CR,LF,0
 dbg_pt_gpt:
