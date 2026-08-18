@@ -635,7 +635,8 @@ _ate_nofree:
 ; The poll does look at the reply once it is back (see _padDrain), but
 ; only to end the wait early when the handler said no. It is never a
 ; substitute for the dol_Task poll: a handler that answers DOSTRUE has
-; only promised to leave, not left yet.
+; only promised to leave, not left yet. Reading it never releases the
+; block either - that stays tied to dol_Task reaching zero.
 ;
 ; dol_Task is the handler's MsgPort, NOT a Process pointer (the
 ; field name is a historical misnomer); PutMsg goes straight to it.
@@ -688,6 +689,7 @@ _pad_gotmem:
 ;-- poll dol_Task until the handler clears it on exit, bounded so a
 ;   busy or blocked handler cannot hang us
 	move.l	d2,a4			;a4 = &BootCtx again (_bootDelay100ms needs it)
+	sub.l	a3,a3			;a3 = 0: the answer has not been read yet
 	moveq.l	#PAD_POLL_MAX,d3
 _pad_poll:
 	move.l	d4,a0
@@ -704,37 +706,46 @@ _pad_poll:
 	bsr	_bootDebug
 	endc
 	moveq.l	#0,d0			;no answer in ~3 s -> keep the mount
-	bra.s	_pad_out		;(packet block stays if undrained: handler owns it)
+	bra.s	_pad_out		;(block stays: the handler still owns it)
 _pad_refused:
 	moveq.l	#0,d0			;it will not go -> keep the mount
-	bra.s	_pad_out
+	bra.s	_pad_out		;(block stays: it is alive, see the header)
 _pad_gone:
-	bsr	_padDrain		;dead: the reply must be in by now
+;-- dead: pick up the answer if it is still queued, and release the
+;   block only here, where nothing can touch it any more
+	bsr	_padDrain
+	move.l	a3,d0
+	beq.s	_pad_noreply		;never came back -> leave it allocated
+	move.l	a2,a1
+	move.l	#PAD_PKT_SIZE,d0
+	jsr	FreeMem(a6)
+_pad_noreply:
 	moveq.l	#1,d0			;dol_Task == 0 -> safe to remove the node
 _pad_out:
 	movem.l	(sp)+,d2-d4/a2-a4/a6
 	rts
 
 ;-----------------------------------------------------------
-; _padDrain: collect the ACTION_DIE reply if it is back, and read the
-; verdict out of it before the block is freed. A replied packet belongs
-; to us again, so freeing it here is safe; an undrained one stays
-; allocated on purpose, because the handler still owns it.
+; _padDrain: collect the ACTION_DIE reply if it is back and read the
+; verdict out of it. It never releases the block: that happens only once
+; dol_Task has reached zero, because a handler that is part-way through
+; shutting down must not have memory it was handed recycled under it.
 ;   DOSFALSE plus an error code in dp_Res2 is the documented refusal.
 ;   DOSFALSE with dp_Res2 = 0 carries no information: handlers written
 ;   before the convention answer that way and still exit, so it has to
 ;   keep waiting on dol_Task.
-; In : a2 = reply port, or 0 once drained; a6 = ExecBase.
-; Out: d0 = 0 no verdict yet / it means to go; else the refusal code.
-;      a2 = 0 after the packet came back and was freed.
+; In : a2 = reply port, a3 = 0 until the answer has been read, a6 = ExecBase.
+; Out: d0 = 0 no answer yet, or it means to go; else the refusal code.
+;      a3 != 0 once the answer is in, which is what makes the block ours.
 ;-----------------------------------------------------------
 _padDrain:
-	move.l	a2,d0
-	beq.s	_pdr_none		;already drained
+	move.l	a3,d0
+	bne.s	_pdr_none		;already read
 	move.l	a2,a0
 	jsr	GetMsg(a6)
 	tst.l	d0
 	beq.s	_pdr_none		;nothing back yet
+	move.l	#-1,a3			;the answer is in: the block is ours
 	move.l	d0,a0
 	move.l	LN_Name(a0),a0		;sp_Msg.ln_Name -> DosPacket
 	moveq.l	#0,d2
@@ -750,10 +761,6 @@ _padDrain:
 	bsr	_bootDebug
 	endc
 _pdr_yes:
-	move.l	a2,a1
-	move.l	#PAD_PKT_SIZE,d0
-	jsr	FreeMem(a6)
-	sub.l	a2,a2			;drained and freed
 	move.l	d2,d0
 	rts
 _pdr_none:
