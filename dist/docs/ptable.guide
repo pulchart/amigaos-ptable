@@ -13,10 +13,10 @@
     @{"ptable.library: unified partition-table library" link ptable_library__unified_partition_table_library}
     @{"What it does" link What_it_does}
     @{"Flows" link Flows}
+    @{"Partition names" link Partition_names}
     @{"Configuration" link Configuration}
-    @{"Partition naming" link Partition_naming}
     @{"What it looks like (serial debug)" link What_it_looks_like__serial_debug_}
-    @{"Public interface (LVOs)" link Public_interface__LVOs_}
+    @{"Public interface for developers" link Public_interface_for_developers}
     @{"See also" link See_also}
 
 @endnode
@@ -29,9 +29,9 @@
 @{b}F@{ub}
   @{"Flows" link Flows}
 @{b}P@{ub}
-  @{"Partition naming" link Partition_naming}
+  @{"Partition names" link Partition_names}
   @{"ptable.library: unified partition-table library" link ptable_library__unified_partition_table_library}
-  @{"Public interface (LVOs)" link Public_interface__LVOs_}
+  @{"Public interface for developers" link Public_interface_for_developers}
 @{b}S@{ub}
   @{"See also" link See_also}
 @{b}W@{ub}
@@ -43,18 +43,18 @@
 @node ptable_library__unified_partition_table_library "ptable.library: unified partition-table library"
 @{b}@{u}ptable.library: unified partition-table library@{uu}@{ub}
 
-@{fg shine}ptable.library@{fg text} is the AmigaOS partition-table library. It parses every
-partition scheme a removable card might carry ( @{b}RDB@{ub} , @{b}MBR@{ub} , @{b}GPT@{ub} , and
-the partition-table-less @{b}flat@{ub} superfloppy, a whole-disk FAT volume) and
-publishes the result into @{fg shine}partition.resource@{fg text} . A device driver and a
-filesystem handler then share that one parse instead of each carrying
-its own.
+@{fg shine}ptable.library@{fg text} parses every partition scheme a removable card might
+carry ( @{b}RDB@{ub} , @{b}MBR@{ub} , @{b}GPT@{ub} , and the partition-table-less @{b}flat@{ub} superfloppy,
+a whole-disk FAT volume) and publishes the result into
+@{fg shine}partition.resource@{fg text} . A device driver and a filesystem handler then share
+that one parse instead of each carrying its own.
 
-You do not run @{fg shine}ptable.library@{fg text} ; other components open it. This document
-explains what it does and how its behaviour is configured. The @{fg shine}lsptres@{fg text}
-tool (see @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ) shows what it has discovered at runtime. The library ships
-alongside its consumer @{fg shine}compactflash.device@{fg text} , or embedded in a Kickstart
-ROM for cold-boot autoboot (see the amigaos-kickstart-builder
+You never run it yourself; other components open it. This document
+explains what it does, what you see when it works, and how its behaviour
+is configured. The @{fg shine}lsptres@{fg text} tool (see @{"  __PAIRED_1__  " link "lsptres.guide/Main"} ) shows what it has discovered at
+runtime. The library ships alongside its consumer @{fg shine}compactflash.device@{fg text} ,
+or embedded in a Kickstart ROM for cold-boot autoboot (see the
+amigaos-kickstart-builder
 (https://github.com/pulchart/amigaos-kickstart-builder) repo).
 
 ----------------------------------------
@@ -65,31 +65,44 @@ ROM for cold-boot autoboot (see the amigaos-kickstart-builder
 @node What_it_does "What it does"
 @{b}What it does@{ub}
 
-@{fg shine}ptable.library@{fg text} has two jobs, used at two different times.
+Two jobs, at two different times.
 
-  * @{b}Cold-boot RDB autoboot.@{ub} At Kickstart cold start, before DOS exists, the
-    @{fg shine}compactflash.dosboot@{fg text} module calls @{fg shine}BootScanPartitions@{fg text} . The library scans the
-    card (RDB, MBR, GPT, flat) and publishes every partition into
-    @{fg shine}partition.resource@{fg text} , loads any filesystem handlers stored in the RDB into
-    @{fg shine}FileSystem.resource@{fg text} , and registers the RDB partitions: bootable ones via
-    @{fg shine}AddBootNode@{fg text} (they appear in the Early Startup boot menu), mountable-only ones
-    via @{fg shine}AddDosNode@{fg text} . This is what lets you boot directly from an RDB-partitioned
-    card in the PCMCIA slot. MBR, GPT and flat partitions are published but not
-    registered here: DOS does not exist yet, so their mount configuration cannot
-    be read. The DOS-time automount mounts them.
+@{b}Cold-boot autoboot.@{ub} At Kickstart cold start, before DOS exists, the
+@{fg shine}compactflash.autoboot@{fg text} module calls @{fg shine}BootScanPartitions@{fg text} . The library
+scans the card, publishes every partition it finds into
+@{fg shine}partition.resource@{fg text} , loads any filesystem handlers stored in the RDB
+into @{fg shine}FileSystem.resource@{fg text} , and then registers the @{b}RDB@{ub} partitions: the
+bootable ones with @{fg shine}AddBootNode@{fg text} so they appear in the Early Startup boot
+menu, the rest with @{fg shine}AddDosNode@{fg text} . This is what lets you boot straight off
+an RDB-partitioned card in the PCMCIA slot.
 
-  * @{b}DOS-time scan and automount.@{ub} When a card is hotplugged after the machine is
-    up, the consumer calls @{fg shine}ScanPartitions@{fg text} to publish the card's partitions into
-    @{fg shine}partition.resource@{fg text} , then @{fg shine}MountPartitions@{fg text} to mount them. On removal it calls
-    @{fg shine}MarkAbsent@{fg text} (keep the handler) or @{fg shine}UnmountPartitions@{fg text} (unmount and remove). This
-    is what automounts FAT cards. In @{fg shine}compactflash.device@{fg text} automount is on by
-    default; @{fg shine}AUTOMOUNT 0@{fg text} in @{fg shine}cfd.prefs@{fg text} turns it off. @{fg shine}ScanPartitions@{fg text} runs the same
-    scanner the cold path uses (RDB, MBR, GPT, flat). Partitions already published
-    (the cold-boot card, or a previous scan of the same card) are skipped one by
-    one, so nothing is published twice.
+MBR, GPT and flat partitions are published but not registered at cold
+boot: DOS does not exist yet, so their mount configuration cannot be
+read. The DOS-time automount mounts them a moment later.
 
-One parser serves all three readers: the driver, the FAT handler, and
-the lister all read the same published partition list.
+Registering a partition needs a handler for its filesystem already in
+@{fg shine}FileSystem.resource@{fg text} . FAT partitions match any registered @{fg shine}FAT\x@{fg text} handler,
+every other filesystem must match its DosType exactly. With no handler
+the partition stays published but unmounted, listed by @{fg shine}lsptres@{fg text} as @{fg shine}P---@{fg text} .
+
+@{b}DOS-time scan and automount.@{ub} When a card is inserted after the machine
+is up, the consumer's mount worker (brought up by @{fg shine}compactflash.automount@{fg text}
+) calls @{fg shine}ScanPartitions@{fg text} to publish the card's partitions, then
+@{fg shine}MountPartitions@{fg text} to mount them. On removal it calls @{fg shine}UnmountPartitions@{fg text} or
+@{fg shine}MarkAbsent@{fg text} , depending on the configured policy.
+
+A rescan is a reconcile, not an append: every entry for that device and
+unit is first marked not-present, each partition found refreshes its
+existing slot in place (geometry, DosType, name) or gets a new one, and
+entries that are gone are freed. An entry that is gone but still mounted
+is marked invalid ( @{fg shine}I@{fg text} ) instead, which is what you see after a card
+swap. @{fg shine}ScanPartitions@{fg text} returns only the number of entries it published for
+the first time, so a rescan of an unchanged card returns 0.
+
+In @{fg shine}compactflash.device@{fg text} automount is on by default; @{fg shine}AUTOMOUNT 0@{fg text} in
+@{fg shine}cfd.prefs@{fg text} turns off the mount step only. The scan still runs and the
+partitions are still published, so @{fg shine}lsptres@{fg text} lists them. Removal is never
+gated by @{fg shine}AUTOMOUNT@{fg text} .
 
 ----------------------------------------
 @{"<< Prev" link ptable_library__unified_partition_table_library}  @{"Contents" link Main}  @{"Next >>" link Flows}
@@ -102,14 +115,14 @@ the lister all read the same published partition list.
 The four use cases, shown as the LVO calls each one drives. They all end
 at @{fg shine}partition.resource@{fg text} , the shared registry.
 
-@{b}Cold-boot RDB autoboot.@{ub} The @{fg shine}compactflash.dosboot@{fg text} cold stub calls
+@{b}Cold-boot autoboot.@{ub} The @{fg shine}compactflash.autoboot@{fg text} cold stub calls
 @{fg shine}BootScanPartitions@{fg text} ; bootable RDB partitions become boot-menu entries,
 the other RDB partitions mountable volumes. MBR, GPT and flat partitions
 are published only.
 
 @{fg highlight}
   +----------------------------+                                                
-  |    compactflash.dosboot    |                                                
+  |   compactflash.autoboot    |                                                
   +----------------------------+                                                
                  |                                                              
                  |                                                              
@@ -194,37 +207,37 @@ worker, which publishes then mounts the card's partitions.
   +--------------------+
 @{fg text}
 
-@{b}Hotplug detach (card removed).@{ub} Two policies (see @{"Configuration" link configuration} ): keep the handler
-(mark absent) or unmount and remove it.
+@{b}Hotplug detach (card removed).@{ub} Two policies (see @{"Configuration" link configuration} ): keep the handler or
+tear it down.
 
 @{fg highlight}
-  +----------------------------+                                                          
-  |        card remove         |                                                          
-  +----------------------------+                                                          
-                 |                                                                        
-                 |                                                                        
-                 |                                                                        
-                 |                                                                        
-                 v                                                                        
-  +----------------------------+                                                          
-  |    mount-worker process    |-------UNMOUNT-NONE-or-fs-not-listed--------+             
-  +----------------------------+                                            |             
-                 |                                                          |             
-                 |                                                          |             
-     default: all|supported fs                                              |             
-                 |                                                          |             
-                 v                                                          v             
-  +----------------------------+                               +-------------------------+
-  |UnmountPartitions prefixList|                               |        MarkAbsent       |
-  +----------------------------+                               +-------------------------+
-                 |                                                          |             
-                 |                                                          |             
-                 |                                                          |             
-                 |                                                          |             
-                 v                                                          v             
-  +----------------------------+                               +-------------------------+
-  |  entry unmounted, removed  |                               |entry kept, marked absent|
-  +----------------------------+                               +-------------------------+
+  +-------------------------------+                                                                                   
+  |          card remove          |                                                                                   
+  +-------------------------------+                                                                                   
+                  |                                                                                                   
+                  |                                                                                                   
+                  |                                                                                                   
+                  |                                                                                                   
+                  v                                                                                                   
+  +-------------------------------+                                                                                   
+  |      mount-worker process     |--------UNMOUNT-list-set---------+                                                 
+  +-------------------------------+                                 |                                                 
+                  |                                                 |                                                 
+                  |                                                 |                                                 
+         UNMOUNT list empty                                         |                                                 
+                  |                                                 |                                                 
+                  v                                                 v                                                 
+  +-------------------------------+                  +----------------------------+                                   
+  |           MarkAbsent          |                  |UnmountPartitions prefixList|--------------------+              
+  +-------------------------------+                  +----------------------------+                    |              
+                  |                                                 |                                  |              
+                  |                                                 |                                  |              
+                  |                                                 |                                  |              
+                  |                                                 |                                  |              
+                  v                                                 v                                  v              
+  +-------------------------------+                  +----------------------------+     +----------------------------+
+  |every entry kept, marked absent|                  |listed filesystems torn down|     |the rest kept, marked absent|
+  +-------------------------------+                  +----------------------------+     +----------------------------+
 @{fg text}
 
 @{b}Handler mount, auto-detect (e.g. fat95).@{ub} A handler probes a card, lets
@@ -278,81 +291,17 @@ its real DOS name with @{fg shine}RegisterPartition@{fg text} .
 @{fg text}
 
 ----------------------------------------
-@{"<< Prev" link What_it_does}  @{"Contents" link Main}  @{"Next >>" link Configuration}
+@{"<< Prev" link What_it_does}  @{"Contents" link Main}  @{"Next >>" link Partition_names}
 
 @endnode
 
-@node Configuration "Configuration"
-@{b}Configuration@{ub}
+@node Partition_names "Partition names"
+@{b}Partition names@{ub}
 
-@{fg shine}ptable.library@{fg text} has no preferences file of its own. Its behaviour is
-configured from two places.
+@{b}RDB@{ub} partitions keep their on-disk name ( @{fg shine}pb_DriveName@{fg text} ) verbatim, for
+example @{fg shine}DH0@{fg text} .
 
-@{b}1. On-disk RDB metadata (cold-boot path).@{ub} Each RDB partition carries its
-own boot priority and flags, and the library uses them as-is:
-
-  @{b}RDB partition flag@{ub}  @{b}BootPri@{ub}  @{b}Result@{ub}                    
-  ------------------  -------  ------------------------  
-  normal              >= 0     bootable: appears in the  
-                               Early Startup boot list   
-  normal              < 0      non-bootable: mounted as  
-                               a DOS volume              
-  NOMOUNT (bit 1)     any      published but never       
-                               mounted (skipped)         
-
-To change which partition boots, or whether one mounts, you edit the RDB
-with a partitioning tool (e.g. HDToolBox), not the library.
-
-@{b}2. The consumer's mount configuration ( @{fg shine}MountCfg@{fg text} , DOS-time path).@{ub}
-@{fg shine}MountPartitions@{fg text} takes an optional @{fg shine}MountCfg@{fg text} that supplies a global mount
-@{fg shine}Flags@{fg text} value, a global @{fg shine}CONTROL@{fg text} string, and a per-filesystem override
-table. The library resolves each partition's @{fg shine}Flags@{fg text} and @{fg shine}CONTROL@{fg text} by its
-DosType (matching the high three bytes, e.g. @{fg shine}FAT\0@{fg text} ), falling back to
-the global value. Passing @{fg shine}0@{fg text} selects cold-boot defaults.
-
-For @{fg shine}compactflash.device@{fg text} , these values come from @{fg shine}ENV:cfd.prefs@{fg text} : the
-@{fg shine}FLAGS@{fg text} and @{fg shine}CONTROL@{fg text} keys, both global and @{fg shine}_<fs>@{fg text} per filesystem (e.g.
-@{fg shine}FLAGS_FAT@{fg text} , @{fg shine}CONTROL_FAT@{fg text} ). So to change how hotplugged cards mount, you
-edit @{fg shine}cfd.prefs@{fg text} , not @{fg shine}ptable.library@{fg text} . The resolved values are recorded
-per partition and shown live by @{fg shine}lsptres@{fg text} in its @{fg shine}MFlg@{fg text} and @{fg shine}Ctrl@{fg text} columns.
-This is only the automount path: a partition mounted statically instead
-shows the Flags and CONTROL its own handler opened the device with (see @{"Partition naming" link partition_naming}
-), since that handler records them the same way via @{fg shine}RegisterPartition@{fg text} .
-
-The full user-facing reference for the @{fg shine}cfd.prefs@{fg text} keys ( @{fg shine}AUTOMOUNT@{fg text} ,
-@{fg shine}FLAGS@{fg text} , @{fg shine}CONTROL@{fg text} , @{fg shine}UNMOUNT@{fg text} , and the per-filesystem overrides), plus
-deployment defaults and the removable-media model, is
-@{fg shine}compactflash.device@{fg text} 's automount guide ( @{fg shine}automount.guide@{fg text} ).
-
-@{b}Detach policy (card removal).@{ub} The library offers two ways to handle a
-removed card's partitions, and the consumer chooses per filesystem:
-
-  * @{b}Unmount and remove ( @{fg shine}compactflash.device@{fg text} default), @{fg shine}UnmountPartitions@{fg text} with a
-    prefix list:@{ub} stop the handler, remove its DOS node (ACTION_DIE + RemDosEntry +
-    free the node), and drop the partition's resource entry from the list.
-    @{fg shine}compactflash.device@{fg text} applies this to all supported filesystems by default; an
-    explicit @{fg shine}UNMOUNT@{fg text} key in @{fg shine}cfd.prefs@{fg text} restricts it to the listed ones, e.g.
-    @{fg shine}UNMOUNT FAT@{fg text} . With no prefix list, @{fg shine}UnmountPartitions@{fg text} unmounts and frees every
-    partition for the device and unit.
-  * @{b}Keep, @{fg shine}MarkAbsent@{fg text} :@{ub} clear @{fg shine}PRESENT@{fg text} but keep the DOS node and handler in memory.
-    The entry stays listed as absent-but-mounted ( @{fg shine}---M@{fg text} ), and reinserting the
-    same card reattaches it without re-initialising the handler. This is the
-    native AmigaOS removable-media model. For @{fg shine}compactflash.device@{fg text} this applies to
-    filesystems not listed in an explicit @{fg shine}UNMOUNT@{fg text} key ( @{fg shine}UNMOUNT NONE@{fg text} keeps
-    everything).
-
-----------------------------------------
-@{"<< Prev" link Flows}  @{"Contents" link Main}  @{"Next >>" link Partition_naming}
-
-@endnode
-
-@node Partition_naming "Partition naming"
-@{b}Partition naming@{ub}
-
-@{b}RDB@{ub} partitions keep their on-disk name ( @{fg shine}pb_DriveName@{fg text} ) verbatim (e.g.
-@{fg shine}DH0@{fg text} ).
-
-@{b}MBR, GPT, and flat@{ub} partitions carry no on-disk name, so the library
+@{b}MBR, GPT and flat@{ub} partitions carry no on-disk name, so the library
 synthesizes one: @{fg shine}PREFIX@{fg text} + unit-letter + partition-number.
 
   * @{b}PREFIX:@{ub} a short device abbreviation from a built-in table, or, for devices not
@@ -374,38 +323,106 @@ synthesizes one: @{fg shine}PREFIX@{fg text} + unit-letter + partition-number.
 
 To give a device its own abbreviation instead of the base-name fallback,
 add it to @{fg shine}s_devAbbrevTable@{fg text} in @{fg shine}../src/ptable_scan.s@{fg text}
-(../src/ptable_scan.s). Name clashes with existing mounts are uniquified
-at register time.
+(../src/ptable_scan.s).
 
-@{b}Overriding the name with a static mountlist.@{ub} The synthesized name is
-only the @{i}scan@{ui} name. If you mount a partition yourself with a static
-@{fg shine}DEVS:DOSDrivers@{fg text} entry, the handler registers the real DOS device name
-(along with the Flags and CONTROL it opened the device with) back onto
-the published entry, matched by device, unit, and start block, so the
-partition is reachable under the name you chose and @{fg shine}lsptres@{fg text} shows that
-mount's @{fg shine}MFlg@{fg text} and @{fg shine}Ctrl@{fg text} . @{fg shine}lsptres@{fg text} then shows both names, as
-@{fg shine}scanname>dosname@{fg text} : e.g. @{fg shine}CFa0>MS0@{fg text} is the partition the library scanned as
-@{fg shine}CFa0@{fg text} , mounted as @{fg shine}MS0:@{fg text} from your mountlist. This is the same
-@{fg shine}RegisterPartition@{fg text} path cfd's automount uses, so the @{fg shine}MFlg@{fg text} and @{fg shine}Ctrl@{fg text}
-columns are accurate whether a partition was automounted or mounted
-statically. RDB partitions always keep their on-disk name.
+@{b}Two names, @{fg shine}scanname>dosname@{fg text} .@{ub} @{fg shine}lsptres@{fg text} shows both names when the DOS
+device name differs from the scan name, and there are two ways that
+happens:
+
+  * You mount the partition yourself from a static @{fg shine}DEVS:DOSDrivers@{fg text} entry. The
+    handler registers its real DOS name, plus the Flags and CONTROL it opened the
+    device with, back onto the published entry, so @{fg shine}CFa0>MS0@{fg text} is the partition
+    scanned as @{fg shine}CFa0@{fg text} and mounted as @{fg shine}MS0:@{fg text} . This is the same @{fg shine}RegisterPartition@{fg text} path
+    cfd's automount uses, so the @{fg shine}MFlg@{fg text} and @{fg shine}Ctrl@{fg text} columns are accurate whichever way
+    a partition was mounted.
+  * The name clashed with an existing mount and was uniquified at register time.
+    Two cards whose RDBs both define @{fg shine}DH0@{fg text} give @{fg shine}DH0@{fg text} and @{fg shine}DH0>DH0.1@{fg text} .
 
 ----------------------------------------
-@{"<< Prev" link Configuration}  @{"Contents" link Main}  @{"Next >>" link What_it_looks_like__serial_debug_}
+@{"<< Prev" link Flows}  @{"Contents" link Main}  @{"Next >>" link Configuration}
+
+@endnode
+
+@node Configuration "Configuration"
+@{b}Configuration@{ub}
+
+@{fg shine}ptable.library@{fg text} has no preferences file of its own. Its behaviour comes
+from two places.
+
+@{b}1. On-disk RDB metadata (cold-boot path).@{ub} Each RDB partition carries its
+own flags, and the library uses them as-is:
+
+  @{b}RDB partition flag@{ub}    @{b}Result@{ub}                                  
+  --------------------  --------------------------------------  
+  bootable (bit 0 set)  appears in the Early Startup boot list  
+  bootable clear        mounted as a DOS volume, not offered    
+                        as a boot device                        
+  NOMOUNT (bit 1 set)   published but never mounted             
+
+BootPri, stored in the partition environment, does not decide
+bootability; it orders the boot list. To change which partition boots,
+or whether one mounts, edit the RDB with a partitioning tool such as
+HDToolBox.
+
+@{b}2. The consumer's mount configuration ( @{fg shine}MountCfg@{fg text} , DOS-time path).@{ub}
+@{fg shine}MountPartitions@{fg text} takes an optional @{fg shine}MountCfg@{fg text} supplying a global mount
+@{fg shine}Flags@{fg text} value, a global @{fg shine}CONTROL@{fg text} string, and a per-filesystem override
+table. The library resolves each partition's @{fg shine}Flags@{fg text} and @{fg shine}CONTROL@{fg text} by its
+DosType (matching the high three bytes, e.g. @{fg shine}FAT\0@{fg text} ), falling back to
+the global value. Passing @{fg shine}0@{fg text} selects cold-boot defaults.
+
+For @{fg shine}compactflash.device@{fg text} these values come from @{fg shine}ENV:cfd.prefs@{fg text} : the @{fg shine}FLAGS@{fg text}
+and @{fg shine}CONTROL@{fg text} keys, global and @{fg shine}_<fs>@{fg text} per filesystem. So to change how
+hotplugged cards mount, you edit @{fg shine}cfd.prefs@{fg text} , not @{fg shine}ptable.library@{fg text} . The
+resolved values are recorded per partition and shown live by @{fg shine}lsptres@{fg text} in
+its @{fg shine}MFlg@{fg text} and @{fg shine}Ctrl@{fg text} columns.
+
+The full user-facing reference for the @{fg shine}cfd.prefs@{fg text} keys, plus deployment
+defaults and the removable-media model, is @{fg shine}compactflash.device@{fg text} 's
+automount guide ( @{fg shine}automount.guide@{fg text} ).
+
+@{b}Detach policy (card removal).@{ub} Two ways to handle a removed card's
+partitions:
+
+  * @{b}Keep, @{fg shine}MarkAbsent@{fg text} :@{ub} clear @{fg shine}PRESENT@{fg text} but keep the DOS node and handler in memory.
+    The entry stays listed as absent-but-mounted ( @{fg shine}---M@{fg text} ), and reinserting the
+    same card reattaches it without re-initialising the handler. This is the
+    native AmigaOS removable-media model. @{fg shine}compactflash.device@{fg text} takes this path when
+    the @{fg shine}UNMOUNT@{fg text} key lists no recognised filesystem, @{fg shine}UNMOUNT NONE@{fg text} being the usual
+    spelling.
+  * @{b}Tear down, @{fg shine}UnmountPartitions@{fg text} with a prefix list:@{ub} stop the handler, remove its
+    DOS node (ACTION_DIE + RemDosEntry + free the node) and drop the entry from
+    the resource. Only filesystems in the list are torn down; any other matched
+    entry is kept and marked absent, exactly as @{fg shine}MarkAbsent@{fg text} would leave it. With no
+    prefix list every mounted entry for the device and unit is torn down.
+    @{fg shine}compactflash.device@{fg text} passes all supported filesystems by default, and an
+    explicit @{fg shine}UNMOUNT@{fg text} key restricts it, for example @{fg shine}UNMOUNT FAT@{fg text} .
+
+@{b}When an unmount does not happen.@{ub} @{fg shine}UnmountPartitions@{fg text} keeps the mount and
+only marks the partition absent if the handler is still alive three
+seconds after @{fg shine}ACTION_DIE@{fg text} . Nothing is freed in that case: the DOS node
+and the handler are left as they were, and the next card removal tries
+again. A volume that something still holds a lock on is the ordinary
+reason, because a filesystem cannot give up a volume whose node has to
+stay in the DOS list for that lock to remain valid. Expect
+@{fg shine}UnmountPartitions@{fg text} to return fewer entries than were mounted, and the
+resource to still hold @{fg shine}---M@{fg text} rows afterwards.
+
+----------------------------------------
+@{"<< Prev" link Partition_names}  @{"Contents" link Main}  @{"Next >>" link What_it_looks_like__serial_debug_}
 
 @endnode
 
 @node What_it_looks_like__serial_debug_ "What it looks like (serial debug)"
 @{b}What it looks like (serial debug)@{ub}
 
-The @{fg shine}full@{fg text} build prints its progress to the serial port at 9600 baud. The
-library tags its own lines @{fg shine}[PT]@{fg text} , and the cold-boot module
-@{fg shine}compactflash.dosboot@{fg text} tags the cold-boot hand-off @{fg shine}[CFD] boot:@{fg text} . The @{fg shine}small@{fg text}
-build is silent.
+The @{fg shine}full@{fg text} build prints its progress to the serial port at 9600 baud, the
+@{fg shine}small@{fg text} build is silent. The library tags its own lines @{fg shine}[PT]@{fg text} . In the
+traces below the surrounding @{fg shine}[CFD] boot:@{fg text} and @{fg shine}[MW]@{fg text} lines come from
+@{fg shine}compactflash.device@{fg text} and show where the library was called from.
 
-@{b}Cold boot, RDB autoboot.@{ub} @{fg shine}compactflash.dosboot@{fg text} opens the library and
-calls @{fg shine}BootScanPartitions@{fg text} ; the library walks the RDB and registers the
-mountable partitions:
+@{b}Cold boot, RDB autoboot.@{ub} The cold stub opens the library and calls
+@{fg shine}BootScanPartitions@{fg text} :
 
 @{fg highlight}
   [CFD] boot: open ptable.library ...
@@ -413,35 +430,58 @@ mountable partitions:
   [CFD] boot: BootScanPartitions(compactflash.device,0)
   [PT] cold boot: scanning for partitions
   [PT] RDB partition table
+  [PT] + filesystem handler PFS v20.0
   [PT] new partitions: 5
   [PT] - skip  SDH10 (no-mount)
   [PT] - skip  SDH11 (no-mount)
-  [PT] + boot  SDH0 (PFS, 512 MB)
-  [PT] + mount SDH1 (PFS, 4096 MB)
-  [PT] + mount SDH2 (PFS, 21767 MB)
+  [PT] + boot  SDH0 (PFS., 512 MB)
+  [PT] + mount SDH1 (PFS., 4096 MB)
+  [PT] + mount SDH2 (PFS., 21767 MB)
   [PT] cold boot done, partitions registered: 3
 @{fg text}
 
-Five partitions are found; the two NOMOUNT entries are skipped, one
-bootable is registered ( @{fg shine}+ boot@{fg text} ) and two mountable ( @{fg shine}+ mount@{fg text} ), so
-three are registered.
+Five partitions are published, the two NOMOUNT entries are skipped, one
+bootable is registered ( @{fg shine}+ boot@{fg text} ) and two mountable ( @{fg shine}+ mount@{fg text} ). The
+DosType prints as four characters with @{fg shine}.@{fg text} standing in for a NUL byte, so
+@{fg shine}PFS\0@{fg text} reads @{fg shine}PFS.@{fg text} .
 
-@{b}Hotplug, DOS-time scan.@{ub} An inserted card is scanned, its partitions
-published, then mounted by the consumer's mount worker. Here a GPT card
-with three FAT partitions in the PCMCIA slot, automounted:
+A FAT card at cold boot is published and left for DOS time, which is
+what the other skip reason means:
 
 @{fg highlight}
+  [PT] cold boot: scanning for partitions
+  [PT] GPT partition table
+  [PT] new partitions: 1
+  [PT] - skip  CFa0 (not RDB: mounted at DOS time)
+  [PT] cold boot done, partitions registered: 0
+@{fg text}
+
+@{b}Hotplug, DOS-time scan.@{ub} An inserted card is scanned, published, then
+mounted by the consumer's mount worker. Here a GPT card with three FAT
+partitions:
+
+@{fg highlight}
+  [MW] scanning compactflash.device:0 for partitions
   [PT] scanning for partitions
   [PT] GPT partition table
   [PT] new partitions: 3
+  [MW] scan done, new partitions: 3
+  [MW] mounting new partitions
   [PT] mounting partitions
-  [PT] mounted CFa0 (FAT, 2048 MB)
-  [PT] mounted CFa1 (FAT, 4096 MB)
-  [PT] mounted CFa2 (FAT, 8192 MB)
+  [PT] mounted CFa0 (FAT., 2048 MB)
+  [PT] mounted CFa1 (FAT., 4096 MB)
+  [PT] mounted CFa2 (FAT., 8192 MB)
+  [MW] mounted volumes: 3
 @{fg text}
 
+@{fg shine}[PT] reusing handler <name>@{fg text} appears in place of @{fg shine}mounted@{fg text} when a DOS node
+of that name already exists and is rebound instead of created, and
+@{fg shine}[PT] mounted as <name>@{fg text} when a handler overlays its own DOS name through
+@{fg shine}RegisterPartition@{fg text} . A whole-disk card prints
+@{fg shine}[PT] whole-disk FAT (superfloppy)@{fg text} in place of a partition-table line.
+
 The resulting @{fg shine}partition.resource@{fg text} , listed by @{fg shine}lsptres@{fg text} (columns explained
-in @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ; @{fg shine}Text@{fg text} is the four-character text of the DosType):
+in @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ):
 
 @{fg highlight}
   Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
@@ -451,79 +491,115 @@ in @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ; @{fg shine}Text@{fg text} i
   CFa2         compactflash.    0    2 GPT   0 0x46415400 FAT. P--M      0 -d-D
 @{fg text}
 
-The three FAT partitions show the synthesized scan name ( @{fg shine}CFa0@{fg text} .. @{fg shine}CFa2@{fg text}
-), all mounted ( @{fg shine}P--M@{fg text} ), with the @{fg shine}Ctrl@{fg text} value @{fg shine}-d-D@{fg text} resolved from
+All three are mounted ( @{fg shine}P--M@{fg text} ), with the @{fg shine}Ctrl@{fg text} value @{fg shine}-d-D@{fg text} resolved from
 @{fg shine}CONTROL_FAT@{fg text} in @{fg shine}cfd.prefs@{fg text} .
 
-@{b}Hotplug, card removed.@{ub} On removal the library has two policies (see @{"Detach policy" link configuration} ).
-With the keep policy ( @{fg shine}UNMOUNT NONE@{fg text} in @{fg shine}cfd.prefs@{fg text} , or a filesystem not
-listed in an explicit @{fg shine}UNMOUNT@{fg text} key) each partition's handler stays in
-memory and is just marked absent, so the entry stays in the resource
-with @{fg shine}PRESENT@{fg text} cleared ( @{fg shine}---M@{fg text} ) and reinserting the same card reattaches
-it:
+@{b}Card removed, keep policy.@{ub} With @{fg shine}UNMOUNT NONE@{fg text} the handlers stay in memory
+and the entries are only marked absent, so reinserting the same card
+reattaches them:
 
 @{fg highlight}
+  [MW] card removed
   [PT] card removed, media absent
+  [MW] entries detached: 0
 @{fg text}
 
 @{fg highlight}
-  Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
-  ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
   CFa0         compactflash.    0    0 GPT   0 0x46415400 FAT. ---M      0 -d-D
   CFa1         compactflash.    0    1 GPT   0 0x46415400 FAT. ---M      0 -d-D
   CFa2         compactflash.    0    2 GPT   0 0x46415400 FAT. ---M      0 -d-D
 @{fg text}
 
-By @{fg shine}compactflash.device@{fg text} 's default (all supported filesystems in the
-unmount list, here equally with @{fg shine}UNMOUNT FAT@{fg text} ), the FAT partitions are
-instead unmounted and removed entirely: handlers stopped, DOS nodes
-removed, and dropped from the resource (the list ends up empty):
+@{b}Card removed, teardown policy.@{ub} With the default list, or @{fg shine}UNMOUNT FAT@{fg text}
+here, the FAT partitions are unmounted and dropped from the resource:
 
 @{fg highlight}
-  [PT] card removed, media absent
+  [MW] card removed
   [PT] unmounting partitions
   [PT] unmounted CFa0
   [PT] unmounted CFa1
   [PT] unmounted CFa2
+  [MW] entries detached: 3
 @{fg text}
 
+A handler that will not go prints
+@{fg shine}[PT] handler still alive after ACTION_DIE, kept absent@{fg text} , and that
+partition stays @{fg shine}---M@{fg text} .
+
 ----------------------------------------
-@{"<< Prev" link Partition_naming}  @{"Contents" link Main}  @{"Next >>" link Public_interface__LVOs_}
+@{"<< Prev" link Configuration}  @{"Contents" link Main}  @{"Next >>" link Public_interface_for_developers}
 
 @endnode
 
-@node Public_interface__LVOs_ "Public interface (LVOs)"
-@{b}Public interface (LVOs)@{ub}
+@node Public_interface_for_developers "Public interface for developers"
+@{b}Public interface for developers@{ub}
 
-For consumers. Full struct field layout for @{fg shine}MountCfg@{fg text} , @{fg shine}PartEntry@{fg text} , and
-@{fg shine}partition.resource@{fg text} lives in the public header @{fg shine}../src/ptable_pub.i@{fg text}
-(../src/ptable_pub.i).
+@{fg shine}OpenLibrary("ptable.library", 2)@{fg text} . The tree builds one version, 2.0, and
+every shipping consumer opens it at version 2 on every path, cold stub
+included.
 
 @{fg highlight}
-  BootScanPartitions(deviceName:a1, unit:d0)                 -30  cold-boot RDB scan + register
-  ScanPartitions(deviceName:a1, unit:d0)                     -36  publish RDB/MBR/GPT/flat -> partition.resource (d0 = newly published)
-  MountPartitions(deviceName:a1, unit:d0, cfg:a0)            -42  AddDosNode(ADNF_STARTPROC) the entries
-  UnmountPartitions(deviceName:a1, unit:d0, prefixList:a0)   -48  ACTION_DIE + RemDosEntry + free (prefixList=0: all; else by dostype, rest kept)
-  RegisterPartition(deviceName:a1, unit:d0, ...)            -54  overlay a handler's real DOS name/flags onto an entry
-  MarkAbsent(deviceName:a1, unit:d0)                         -60  card removed: clear PRESENT, keep handler in memory
+  BootScanPartitions(deviceName:a1, unit:d0)                 -30
+  ScanPartitions(deviceName:a1, unit:d0)                     -36
+  MountPartitions(deviceName:a1, unit:d0, cfg:a0)            -42
+  UnmountPartitions(deviceName:a1, unit:d0, prefixList:a0)   -48
+  RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
+                    nameBSTR:a0, devNode:a2, flags:d3, control:d4)  -54
+  MarkAbsent(deviceName:a1, unit:d0)                         -60
 @{fg text}
 
-  * @{fg shine}OpenLibrary("ptable.library", 1)@{fg text} is enough for the cold-boot RDB path (
-    @{fg shine}BootScanPartitions@{fg text} ); the DOS-time scan and mount calls require version @{fg shine}2@{fg text} . A
-    v1 library has only @{fg shine}BootScanPartitions@{fg text} .
-  * @{fg shine}BootScanPartitions@{fg text} runs from an @{fg shine}RTF_COLDSTART@{fg text} context (pre-DOS, single task).
-    @{fg shine}RegisterPartition@{fg text} and @{fg shine}MarkAbsent@{fg text} are Exec-only; @{fg shine}MountPartitions@{fg text} and
-    @{fg shine}UnmountPartitions@{fg text} must be called from a process.
+  @{b}LVO@{ub}                 @{b}Returns in d0@{ub}           @{b}Call from@{ub}                 
+  ------------------  ----------------------  ------------------------  
+  @{fg shine}BootScanPartitions@{fg text}  partitions registered   @{fg shine}RTF_COLDSTART@{fg text} , pre-DOS,  
+                                              single task               
+  @{fg shine}ScanPartitions@{fg text}      partitions @{b}newly@{ub}        any task, Exec context    
+                      published                                         
+  @{fg shine}MountPartitions@{fg text}     partitions mounted      a process                 
+  @{fg shine}UnmountPartitions@{fg text}   entries torn down       a process                 
+  @{fg shine}RegisterPartition@{fg text}   1 updated, 0 not found  any task, Exec context    
+  @{fg shine}MarkAbsent@{fg text}          entries cleared         any task, Exec context    
+
+Notes a consumer needs:
+
+  * @{fg shine}MarkAbsent@{fg text} never blocks: it takes the resource lock with an attempt and does
+    nothing at all if the lock is busy, so a return of 0 does not mean there were
+    no entries.
+  * @{fg shine}RegisterPartition@{fg text} matches on device, unit and start block. @{fg shine}control@{fg text} is a BSTR
+    pointer, @{fg shine}0@{fg text} for none.
   * @{fg shine}cfg@{fg text} is a @{fg shine}MountCfg@{fg text} (or @{fg shine}0@{fg text} for cold-boot defaults): global @{fg shine}mc_Flags@{fg text} and
-    @{fg shine}mc_Control@{fg text} plus a 0-terminated per-dostype override table. The library
-    resolves each entry by @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} .
-  * @{fg shine}ScanPartitions@{fg text} detects all four schemes; entries already published (by the
-    cold path or a previous scan) are skipped one by one, so nothing publishes or
-    mounts twice.
-  * @{fg shine}partition.resource@{fg text} is the runtime single source of truth for discovered
-    partitions; readers walk its list under @{fg shine}Forbid()@{fg text} or take its semaphore. Its
-    layout and the @{fg shine}PartEntry@{fg text} fields are documented in @{fg shine}../src/ptable_pub.i@{fg text}
-    (../src/ptable_pub.i).
+    @{fg shine}mc_Control@{fg text} plus a 0-terminated per-dostype override table, resolved by
+    @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} .
+  * @{fg shine}prefixList@{fg text} is a 0-terminated list of dostype high three bytes, e.g. @{fg shine}$50465300@{fg text}
+    for @{fg shine}PFS@{fg text} .
+  * @{fg shine}BootScanPartitions@{fg text} also registers a synthetic ConfigDev (Vendor ID @{fg shine}65535@{fg text} ,
+    Product ID @{fg shine}1@{fg text} ) when it registered at least one node, which is what puts the
+    device in the Early Startup boot menu and in @{fg shine}ShowConfig@{fg text} .
+  * For MBR, GPT and flat partitions the mount path builds an auto-detect
+    DeviceNode: @{fg shine}de_LowCyl = 0@{fg text} and the device-scheme DosType @{fg shine}$464154FF@{fg text} , so one
+    persistent fat95 handler binds once and picks its partition from the trailing
+    digit of the node name. That is how a single handler tracks any card layout
+    across swaps.
+
+@{b}@{fg shine}partition.resource@{fg text} layout.@{ub} Readers walk @{fg shine}ptr_PartList@{fg text} under @{fg shine}Forbid()@{fg text} or
+take @{fg shine}ptr_Lock@{fg text} . @{fg shine}OpenResource@{fg text} cannot negotiate versions, so the only
+runtime layout signal is the pair of stamps in the header, @{fg shine}ptr_Layout@{fg text}
+(currently @{fg shine}PTR_LAYOUT_V = 2@{fg text} ) and @{fg shine}ptr_EntrySize@{fg text} , plus @{fg shine}pe_Length@{fg text} per
+entry. Fields are appended only, never inserted, because @{fg shine}lsptres@{fg text} and
+fat95 ship separately-built offset mirrors; a consumer that needs a
+newer field checks the stamp and degrades if it is older. The full field
+layout is in @{fg shine}../src/ptable_pub.i@{fg text} (../src/ptable_pub.i).
+
+@{b}Lock order.@{ub} @{fg shine}ptr_Lock@{fg text} is the outer lock, DOS list locks are only ever
+taken inside it, and a handler started by the library must not call back
+into a ptable LVO while starting up.
+
+@{b}Resident priorities@{ub} , for ROM integrators: @{fg shine}ptable.library@{fg text} at 22 and
+@{fg shine}compactflash.device@{fg text} at 21, both @{fg shine}RTF_AUTOINIT@{fg text} and ahead of everything
+that uses them, and the cold stub @{fg shine}compactflash.autoboot@{fg text} at -5. The stub
+has to run after every ROM filesystem has registered in
+@{fg shine}FileSystem.resource@{fg text} (fat95 registers at 0) or it binds no handler, and
+well above @{fg shine}strap@{fg text} at -60, because @{fg shine}AddBootNode@{fg text} must happen before strap
+runs.
 
 ----------------------------------------
 @{"<< Prev" link What_it_looks_like__serial_debug_}  @{"Contents" link Main}  @{"Next >>" link See_also}
@@ -545,6 +621,6 @@ For consumers. Full struct field layout for @{fg shine}MountCfg@{fg text} , @{fg
     full LVO, @{fg shine}MountCfg@{fg text} , and @{fg shine}PartEntry@{fg text} definitions.
 
 ----------------------------------------
-@{"<< Prev" link Public_interface__LVOs_}  @{"Contents" link Main}
+@{"<< Prev" link Public_interface_for_developers}  @{"Contents" link Main}
 
 @endnode
