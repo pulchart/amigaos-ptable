@@ -611,7 +611,8 @@ _ate_nofree:
 ; to actually vanish.
 ; In : a0 = DeviceNode, a4 = &BootCtx, a5 = ExecBase; PROCESS context
 ; Out: d0 != 0 -> handler gone (dol_Task == 0) = safe to remove the node;
-;      d0 == 0 -> handler still alive after the poll = keep the mount.
+;      d0 == 0 -> handler still alive after the poll, or it refused the
+;      packet outright = keep the mount.
 ;
 ; NEVER waits on the handler: our caller holds PTR_Lock, and a dying
 ; handler may block on that very lock before reaching its packet loop
@@ -627,6 +628,11 @@ _ate_nofree:
 ; is deliberately leaked (bounded, 102 bytes) - the PA_IGNORE port
 ; absorbs the eventual reply without touching any task.
 ;
+; The poll does look at the reply once it is back (see _padDrain), but
+; only to end the wait early when the handler said no. It is never a
+; substitute for the dol_Task poll: a handler that answers DOSTRUE has
+; only promised to leave, not left yet.
+;
 ; dol_Task is the handler's MsgPort, NOT a Process pointer (the
 ; field name is a historical misnomer); PutMsg goes straight to it.
 ;===========================================================
@@ -636,7 +642,8 @@ _partActionDie:
 	movem.l	d2-d4/a2-a4/a6,-(sp)
 	move.l	a5,a6
 	move.l	a0,d4			;d4 = DeviceNode (survives the packet round-trip)
-	move.l	a4,d2			;d2 = &BootCtx (a4 is reused as packet ptr below)
+	move.l	a4,d2			;d2 = &BootCtx (a4 is reused as packet ptr below,
+				; and d2 becomes _padDrain scratch after that)
 	move.l	dol_Task(a0),d0
 	bne.s	_pad_have
 	moveq.l	#-1,d0			;no handler started -> nothing to kill, safe
@@ -682,24 +689,64 @@ _pad_poll:
 	move.l	d4,a0
 	tst.l	dol_Task(a0)		;handler unregistered itself?
 	beq.s	_pad_gone
+	bsr	_padDrain		;did it answer meanwhile?
+	tst.l	d0
+	bne.s	_pad_refused		;refused -> no point in waiting out the poll
 	bsr	_bootDelay100ms		;clobbers d0/d1 only
 	subq.l	#1,d3
 	bne.s	_pad_poll
 	moveq.l	#0,d0			;still alive after ~3 s -> keep the mount
-	bra.s	_pad_out		;(packet block stays: handler owns it)
+	bra.s	_pad_out		;(packet block stays if undrained: handler owns it)
+_pad_refused:
+	ifd	DEBUG
+	lea	dbg_pt_die_nack(pc),a0
+	bsr	_bootDebug		;preserves d0 = the refusal code
+	bsr	_bootDebugDecW
+	lea	dbg_boot_nl(pc),a0
+	bsr	_bootDebug
+	endc
+	moveq.l	#0,d0			;it will not go -> keep the mount
+	bra.s	_pad_out
 _pad_gone:
-;-- dead: the reply must already be in our port - drain and free.
-;   Defensively leak instead of freeing if it is not (never free a
-;   packet a live handler might still touch).
-	move.l	a2,a0
-	jsr	GetMsg(a6)
-	tst.l	d0
-	beq.s	_pad_noreply
-	move.l	a2,a1
-	move.l	#PAD_PKT_SIZE,d0
-	jsr	FreeMem(a6)
-_pad_noreply:
+	bsr	_padDrain		;dead: the reply must be in by now
 	moveq.l	#1,d0			;dol_Task == 0 -> safe to remove the node
 _pad_out:
 	movem.l	(sp)+,d2-d4/a2-a4/a6
+	rts
+
+;-----------------------------------------------------------
+; _padDrain: collect the ACTION_DIE reply if it is back, and read the
+; verdict out of it before the block is freed. A replied packet belongs
+; to us again, so freeing it here is safe; an undrained one stays
+; allocated on purpose, because the handler still owns it.
+;   DOSFALSE plus an error code in dp_Res2 is the documented refusal.
+;   DOSFALSE with dp_Res2 = 0 carries no information: handlers written
+;   before the convention answer that way and still exit, so it has to
+;   keep waiting on dol_Task.
+; In : a2 = reply port, or 0 once drained; a6 = ExecBase.
+; Out: d0 = 0 no verdict yet / it means to go; else the refusal code.
+;      a2 = 0 after the packet came back and was freed.
+;-----------------------------------------------------------
+_padDrain:
+	move.l	a2,d0
+	beq.s	_pdr_none		;already drained
+	move.l	a2,a0
+	jsr	GetMsg(a6)
+	tst.l	d0
+	beq.s	_pdr_none		;nothing back yet
+	move.l	d0,a0
+	move.l	LN_Name(a0),a0		;sp_Msg.ln_Name -> DosPacket
+	moveq.l	#0,d2
+	tst.l	dp_Res1(a0)
+	bne.s	_pdr_free		;DOSTRUE: termination is under way
+	move.l	dp_Res2(a0),d2		;DOSFALSE: a code here means refused
+_pdr_free:
+	move.l	a2,a1
+	move.l	#PAD_PKT_SIZE,d0
+	jsr	FreeMem(a6)
+	sub.l	a2,a2			;drained and freed
+	move.l	d2,d0
+	rts
+_pdr_none:
+	moveq.l	#0,d0
 	rts
