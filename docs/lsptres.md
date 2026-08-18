@@ -1,6 +1,8 @@
 # lsptres - partition.resource lister
 
-`lsptres` lists `partition.resource`: every partition that `ptable.library` has discovered and published, whether registered at cold boot or scanned when a card was hotplugged. It reports the partition scheme it came from (RDB, MBR, GPT or a partition-table-less "flat" superfloppy), the DosType, mount state, and the mount Flags / CONTROL string resolved for it. It is the companion to fat95's `lsfsres`, which lists `FileSystem.resource`.
+`lsptres` lists `partition.resource`: every partition that `ptable.library` has discovered and published, whether registered at cold boot or scanned when a card was hotplugged.
+
+Each row reports the partition scheme it came from (RDB, MBR, GPT or a partition-table-less "flat" superfloppy), the DosType, the mount state, and the mount Flags and CONTROL string resolved for it. It is the companion to fat95's `lsfsres`, which lists `FileSystem.resource`.
 
 **Use cases**:
 - Confirm a hotplugged card's partitions were scanned and mounted.
@@ -60,7 +62,9 @@ The `P--M` flags read: present, mounted (not bootable, not nomount). The Text of
 
 ### A single MBR partition reattached over a 3-partition GPT card (the `I` flag)
 
-Starting from the three-FAT GPT card above (all `P--M`), that card was removed and a single-partition MBR card inserted in its place. The scan re-matches the new card's one partition to the `CFa0` slot - note its Src flips `GPT`->`MBR`, the fresh card's scheme. The `CFa1` and `CFa2` handlers were never unmounted, and the MBR card has no partition for them, so those slots go `I` (invalid): the present bit clears while mounted stays.
+Starting from the three-FAT GPT card above (all `P--M`), that card was removed and a single-partition MBR card inserted in its place.
+
+The scan re-matches the new card's one partition to the `CFa0` slot, and its Src flips `GPT` to `MBR`, the fresh card's scheme. The `CFa1` and `CFa2` handlers were never unmounted and the MBR card has no partition for them, so those slots go `I` (invalid): the present bit clears while mounted stays.
 
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl

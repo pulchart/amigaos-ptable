@@ -158,17 +158,18 @@ PERM_CMD	= 4			;CMD_READ
 ; pe_NameB naming:
 ;   RDB    -> the on-disk pb_DriveName, verbatim.
 ;   MBR/GPT/FLAT (no on-disk name) -> synthesized as
-;            <PPP><unit-letter><partition-number>
-;            PPP    3-char device prefix (see below)
-;            unit   'A'+unit  (A = unit 0, B = unit 1, ...)
-;            part   decimal partition number, 1-based
-;            e.g. compactflash.device unit 0 -> CFDA1 CFDA2 CFDA3
-;                 scsi.device         unit 0 -> SCSA1 SCSA2 ...
-;   The 3-char prefix comes from a known-device abbreviation table
-;   (compactflash.device -> CFD; extend s_devAbbrevTable in
-;   ptable_scan.s) or, for unlisted devices, the first three letters
-;   of the device name uppercased. Name clashes with existing mounts
-;   are uniquified (.1/.2) at register time.
+;            <PREFIX><unit-letter><partition-number>
+;            PREFIX device abbreviation (see below)
+;            unit   'a'+unit  (a = unit 0, b = unit 1, ... p = unit 15)
+;            part   decimal partition number, 0-based
+;            e.g. compactflash.device unit 0 -> CFa0 CFa1 CFa2
+;                 scsi.device         unit 0 -> SCSIa0 SCSIa1 ...
+;   The prefix comes from a known-device abbreviation table
+;   (compactflash.device -> CF; extend s_devAbbrevTable in
+;   ptable_scan.s) or, for unlisted devices, the device base name with
+;   .device stripped and A-Z/0-9 uppercased. Name clashes with existing
+;   mounts are uniquified (.1/.2) at register time; the registered name
+;   is then recorded in pe_MountName, so lsptres shows scanname>realname.
 
 ;-- pe_Source values
 PES_MBR		= 0
