@@ -121,7 +121,9 @@ The full user-facing reference for the `cfd.prefs` keys, plus deployment default
 - **Keep, `MarkAbsent`:** clear `PRESENT` but keep the DOS node and handler in memory. The entry stays listed as absent-but-mounted (`---M`), and reinserting the same card reattaches it without re-initialising the handler. This is the native AmigaOS removable-media model. `compactflash.device` takes this path when the `UNMOUNT` key lists no recognised filesystem, `UNMOUNT NONE` being the usual spelling.
 - **Tear down, `UnmountPartitions` with a prefix list:** stop the handler, remove its DOS node (ACTION_DIE + RemDosEntry + free the node) and drop the entry from the resource. Only filesystems in the list are torn down; any other matched entry is kept and marked absent, exactly as `MarkAbsent` would leave it. With no prefix list every mounted entry for the device and unit is torn down. `compactflash.device` passes all supported filesystems by default, and an explicit `UNMOUNT` key restricts it, for example `UNMOUNT FAT`.
 
-**When an unmount does not happen.** `UnmountPartitions` keeps the mount and only marks the partition absent if the handler is still alive three seconds after `ACTION_DIE`. Nothing is freed in that case: the DOS node and the handler are left as they were, and the next card removal tries again. A volume that something still holds a lock on is the ordinary reason, because a filesystem cannot give up a volume whose node has to stay in the DOS list for that lock to remain valid. Expect `UnmountPartitions` to return fewer entries than were mounted, and the resource to still hold `---M` rows afterwards.
+**When an unmount does not happen.** `UnmountPartitions` keeps the mount and only marks the partition absent if the handler declined `ACTION_DIE` with an error code, if it is still alive three seconds after the packet, or if the DOS device list stays busy for a second. Nothing is freed in that case: the DOS node and the handler are left as they were, and the next card removal tries again. Expect `UnmountPartitions` to return fewer entries than were mounted, and the resource to still hold `---M` rows afterwards.
+
+A volume that is still in use is the ordinary reason an unmount does not happen. A filesystem cannot give up a volume that something holds a lock on, because the volume node has to stay in the DOS list for that lock to remain valid. Release whatever holds it, for example by closing its Workbench window, and the next removal unmounts it.
 
 ## What it looks like (serial debug)
 
@@ -212,7 +214,7 @@ CFa2         compactflash.    0    2 GPT   0 0x46415400 FAT. ---M      0 -d-D
 [MW] entries detached: 3
 ```
 
-A handler that will not go prints `[PT] handler still alive after ACTION_DIE, kept absent`, and that partition stays `---M`.
+A handler that will not go says why: `[PT] ACTION_DIE declined, code <n>` when it refused outright, or `[PT] ACTION_DIE unanswered, handler alive` when it never replied, followed by `[PT] partition kept, marked absent`. That partition stays `---M`.
 
 ## Public interface for developers
 

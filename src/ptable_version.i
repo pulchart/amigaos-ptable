@@ -3,8 +3,8 @@ LIB_VERSION	= 2
 LIB_REVISION	= 0
 LIB_VERSION_STRING	macro
 	ifd	__68020__
-	dc.b	"ptable.library 2.0-dev (17.08.2026) [68020]"
+	dc.b	"ptable.library 2.0-dev (18.08.2026) [68020]"
 	else
-	dc.b	"ptable.library 2.0-dev (17.08.2026) [68000]"
+	dc.b	"ptable.library 2.0-dev (18.08.2026) [68000]"
 	endc
 	endm
