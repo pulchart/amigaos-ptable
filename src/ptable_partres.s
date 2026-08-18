@@ -36,10 +36,14 @@ dbg_pt_mnt:
 	dc.b	"[PT] mounting partitions",CR,LF,0
 dbg_pt_umnt:
 	dc.b	"[PT] unmounting partitions",CR,LF,0
-dbg_pt_umnt_busy:
-	dc.b	"[PT] handler still alive after ACTION_DIE, kept absent",CR,LF,0
-dbg_pt_die_nack:
-	dc.b	"[PT] handler refused ACTION_DIE, error ",0
+dbg_pt_umnt_keep:
+	dc.b	"[PT] partition kept, marked absent",CR,LF,0
+dbg_pt_die_mute:
+	dc.b	"[PT] ACTION_DIE unanswered, handler alive",CR,LF,0
+dbg_pt_dl_busy:
+	dc.b	"[PT] DOS list busy, node kept",CR,LF,0
+dbg_pt_die_no:
+	dc.b	"[PT] ACTION_DIE declined, code ",0
 dbg_pt_mounted:
 	dc.b	"[PT] mounted ",0
 dbg_pt_reuse:
