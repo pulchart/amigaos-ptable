@@ -492,7 +492,7 @@ _aum_teardown:
 	tst.l	d0
 	bne.s	_aum_td_ok		;gone -> counted
 	ifd	DEBUG
-	lea	dbg_pt_umnt_busy(pc),a0	;still alive -> keep handler, mark absent
+	lea	dbg_pt_umnt_keep(pc),a0	;not torn down -> keep handler, mark absent
 	bsr	_bootDebug
 	endc
 	bra.s	_aum_keep
@@ -556,6 +556,10 @@ _ate_try:
 	bsr	_bootDelay100ms		;0 and 1 both mean busy (pre-V40 wart)
 	subq.l	#1,d4
 	bne.s	_ate_try
+	ifd	DEBUG
+	lea	dbg_pt_dl_busy(pc),a0
+	bsr	_bootDebug
+	endc
 	bra.s	_ate_keep		;list stayed busy -> keep node, blob, handler
 _ate_locked:
 ;-- RemDosEntry only if the node is still listed: PFS3 removes its own
@@ -695,16 +699,13 @@ _pad_poll:
 	bsr	_bootDelay100ms		;clobbers d0/d1 only
 	subq.l	#1,d3
 	bne.s	_pad_poll
-	moveq.l	#0,d0			;still alive after ~3 s -> keep the mount
-	bra.s	_pad_out		;(packet block stays if undrained: handler owns it)
-_pad_refused:
 	ifd	DEBUG
-	lea	dbg_pt_die_nack(pc),a0
-	bsr	_bootDebug		;preserves d0 = the refusal code
-	bsr	_bootDebugDecW
-	lea	dbg_boot_nl(pc),a0
+	lea	dbg_pt_die_mute(pc),a0
 	bsr	_bootDebug
 	endc
+	moveq.l	#0,d0			;no answer in ~3 s -> keep the mount
+	bra.s	_pad_out		;(packet block stays if undrained: handler owns it)
+_pad_refused:
 	moveq.l	#0,d0			;it will not go -> keep the mount
 	bra.s	_pad_out
 _pad_gone:
@@ -738,9 +739,17 @@ _padDrain:
 	move.l	LN_Name(a0),a0		;sp_Msg.ln_Name -> DosPacket
 	moveq.l	#0,d2
 	tst.l	dp_Res1(a0)
-	bne.s	_pdr_free		;DOSTRUE: termination is under way
+	bne.s	_pdr_yes		;DOSTRUE: termination is under way
 	move.l	dp_Res2(a0),d2		;DOSFALSE: a code here means refused
-_pdr_free:
+	ifd	DEBUG
+	lea	dbg_pt_die_no(pc),a0
+	bsr	_bootDebug		;preserves d2
+	move.l	d2,d0
+	bsr	_bootDebugDecW
+	lea	dbg_boot_nl(pc),a0
+	bsr	_bootDebug
+	endc
+_pdr_yes:
 	move.l	a2,a1
 	move.l	#PAD_PKT_SIZE,d0
 	jsr	FreeMem(a6)
