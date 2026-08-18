@@ -521,12 +521,14 @@ _aum_out:
 ;===========================================================
 ; _actTeardownEntry: destroy one MOUNTED entry's node + handler, then
 ; unlink + free the PartEntry.
-; ACTION_DIE + wait-for-death -> guarded RemDosEntry (under DOS write-lock;
-; PFS3 removes its own DeviceNode before dying, so remove only if still
-; listed) -> free DN blob -> Remove + free the entry.
+; ACTION_DIE + wait-for-death -> guarded RemDosEntry (under a DOS write-lock
+; taken by attempt+retry, never blocking; PFS3 removes its own DeviceNode
+; before dying, so remove only if still listed) -> free DN blob -> Remove
+; + free the entry.
 ; In : a3 = entry, a4 = &BootCtx, a5 = ExecBase.
-; Out: d0 = 1 torn down + freed; 0 = handler still alive / no dos.library
-;      -> everything kept intact (caller marks the entry absent).
+; Out: d0 = 1 torn down + freed; 0 = handler still alive / no dos.library /
+;      DOS list stayed busy -> everything kept intact (caller marks the
+;      entry absent).
 ; Preserves d2/d3/d5-d7/a2/a4/a5, clobbers d0-d1/d4/a0-a1/a6.
 ;===========================================================
 _actTeardownEntry:
@@ -538,15 +540,28 @@ _ate_keep:
 	moveq.l	#0,d0			;still alive -> keep the mount intact
 	rts
 _ate_died:
-	move.l	BC_DosBase(a4),d4
+	move.l	BC_DosBase(a4),d0
 	beq.s	_ate_keep		;no dos.library -> cannot unlink: keep it all
-	move.l	d4,a6
+	move.l	d0,a6
+;-- never block on the DOS list: dos.library holds it across the packet
+;   round-trip that starts a handler, and we hold PTR_Lock here, so a
+;   blocking LockDosList can close the circle. Attempt, back off, retry.
+	moveq.l	#ALD_TRY_MAX,d4
+_ate_try:
 	move.l	#LDF_DEVICES+LDF_WRITE,d1
-	jsr	LockDosList(a6)
+	jsr	AttemptLockDosList(a6)
+	moveq.l	#1,d1
+	cmp.l	d0,d1
+	bcs.s	_ate_locked		;>1 is a real list pointer
+	bsr	_bootDelay100ms		;0 and 1 both mean busy (pre-V40 wart)
+	subq.l	#1,d4
+	bne.s	_ate_try
+	bra.s	_ate_keep		;list stayed busy -> keep node, blob, handler
+_ate_locked:
 ;-- RemDosEntry only if the node is still listed: PFS3 removes its own
 ;   DeviceNode before replying ACTION_DIE, fat95 leaves it to us
 	move.l	d2,-(sp)		;NextDosEntry wants flags in d2
-	move.l	d0,d1			;walk seed from LockDosList
+	move.l	d0,d1			;walk seed from AttemptLockDosList
 	moveq.l	#LDF_DEVICES,d2
 _ate_scan:
 	jsr	NextDosEntry(a6)
