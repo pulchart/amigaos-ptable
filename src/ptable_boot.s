@@ -137,8 +137,8 @@ dn_Name		= 40
 AddTail		= -246			;exec (entry publish order)
 
 ;-- dos.library LVOs (runtime acts only; never called pre-DOS)
-LockDosList	= -654
 UnLockDosList	= -660
+AttemptLockDosList = -666
 RemDosEntry	= -672
 NextDosEntry	= -690
 
@@ -150,6 +150,7 @@ GetMsg		= -372
 ADNF_STARTPROC	= 1
 ACTION_DIE	= 5
 PAD_POLL_MAX	= 30			;ACTION_DIE death-poll tries (x100 ms = 3 s)
+ALD_TRY_MAX	= 10			;AttemptLockDosList tries (x100 ms = 1 s)
 LDF_WRITE	= 2
 LDF_DEVICES	= 4
 
@@ -160,6 +161,8 @@ dol_Task	= 8			;DosList/DeviceNode handler process
 dp_Link		= 0
 dp_Port		= 4
 dp_Type		= 8
+dp_Res1		= 12
+dp_Res2		= 16
 SP_SIZEOF	= 68			;MN_SIZE(20) + dp_SIZEOF(48)
 
 ;-- DosEnvec longword indexes (DE_BOOTPRI/DE_DOSTYPE defined above)
