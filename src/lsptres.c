@@ -59,7 +59,7 @@ struct PartResource {
     UWORD                  pr_EntrySize;  /* 96  publisher's pe_Sizeof */
 };                                        /* 98 */
 
-#define PTR_LAYOUT_KNOWN 2  /* highest layout this tool understands */
+#define PTR_LAYOUT_KNOWN 3  /* highest layout this tool understands */
 
 /* PartEntry (ptable_pub.i; layout = PTR_LAYOUT_KNOWN) */
 struct PartEntry {
@@ -86,7 +86,9 @@ struct PartEntry {
     UBYTE        pe_Control[32]; /* 212 (BSTR) */
     UWORD        pe_Length;      /* 244 allocated entry size (bounds-check
                                   *     appended fields against this) */
-    UBYTE        pe_Reserved[14];/* 246..259 */
+    UBYTE        pe_pad3[2];     /* 246 (pad to pe_NodeDosType) */
+    ULONG        pe_NodeDosType; /* 248 layout 3: DosType stamped on the node */
+    UBYTE        pe_Reserved[8]; /* 252..259 */
 };                               /* 260 */
 
 static const char *src_name(UBYTE s)
@@ -192,7 +194,7 @@ static const char *merged_name(const struct PartEntry *pe)
 }
 
 /* Default columns plus, when verbose, Start/Blocks/Size */
-static void view_all(struct List *list, int verbose)
+static void view_all(struct List *list, int verbose, int nodedt)
 {
     struct Node *n;
     struct PartEntry *pe;
@@ -212,7 +214,17 @@ static void view_all(struct List *list, int verbose)
     printf("\r\n");
 
     for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+        ULONG dt;
+
         pe = (struct PartEntry *)n;
+        /* The DosType the mount really uses. pe_DosType is only what was
+         * DETECTED on the card; once mounted, what matters is the DosType the
+         * node carries, which is the auto-detect marker for a handler finding
+         * its own partition and whatever the consumer asked for otherwise. An
+         * unmounted entry has no node, so it falls back to the detected value. */
+        dt = pe->pe_DosType;
+        if (nodedt && pe->pe_NodeDosType && (pe->pe_Flags & PEF_MOUNTED))
+            dt = pe->pe_NodeDosType;
         printf("%-12s %-13.13s %4lu %4lu %-3s %3ld 0x%08lX ",
                merged_name(pe),
                pe->pe_Device ? pe->pe_Device : (char *)"?",
@@ -220,8 +232,8 @@ static void view_all(struct List *list, int verbose)
                (unsigned long)pe->pe_PartIndex,
                src_name(pe->pe_Source),
                (long)pe->pe_BootPri,
-               (unsigned long)pe->pe_DosType);
-        print_dostype(pe->pe_DosType);
+               (unsigned long)dt);
+        print_dostype(dt);
         printf(" %-5s %5lu %-10s",
                flags_str(pe->pe_Flags),
                (unsigned long)pe->pe_MountFlags,
@@ -245,8 +257,10 @@ static void usage(void)
            "Name:  partition name, plus \">dosname\" when mounted under another name\r\n"
            "Src:   MBR GPT RDB FLT   (partition scheme)\r\n"
            "Flags: P present  I invalid (card in, slot not on it)  B bootable  N nomount  M mounted\r\n"
-           "MFlg:  mount Flags (node fssm_Flags from cfd.prefs)\r\n"
+           "MFlg:  mount Flags the partition was mounted with\r\n"
            "Ctrl:  CONTROL string resolved for this mount\r\n"
+           "DosType: the DosType the mount uses - for a mounted partition the\r\n"
+           "       one its node carries, else the one detected on the card\r\n"
            "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\r\n");
 }
 
@@ -255,6 +269,7 @@ int main(void)
     struct PartResource *res;
     struct RDArgs *rda;
     LONG opt[1] = { 0 };   /* VERBOSE */
+    int have_nodedt = 0;   /* publisher is layout 3 or newer */
 
     rda = ReadArgs("VERBOSE=V/S", opt, NULL);
     if (!rda) {
@@ -274,6 +289,8 @@ int main(void)
      * (struct Library lib_PosSize at offset 18; header grew 94 -> 98) */
     {
         UWORD possize = *(UWORD *)((UBYTE *)res + 18);
+        if (possize >= 98 && res->pr_Layout >= 3)
+            have_nodedt = 1;
         if (possize >= 98 && res->pr_Layout > PTR_LAYOUT_KNOWN)
             printf("note: resource layout v%u is newer than this tool (v%u); "
                    "appended fields are not shown\r\n",
@@ -284,7 +301,7 @@ int main(void)
     }
 
     Forbid();
-    view_all(&res->pr_PartList, opt[0] ? 1 : 0);
+    view_all(&res->pr_PartList, opt[0] ? 1 : 0, have_nodedt);
     Permit();
 
     FreeArgs(rda);

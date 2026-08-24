@@ -245,7 +245,9 @@ PTDEC	macro
 ;     128     4   BC_DevNameBSTR  cached BSTR(BPTR) of BC_DevName
 ;                                 for fssm_Device (0 = alloc failed,
 ;                                 _actBuildBlob then skips)
-;     132   512   block buffer (BC_BlockBuf points here)
+;     140     4   BC_NodeHandler  resolved handler path for this entry
+;                                 (0 = FileSystem.resource only)
+;     144   512   block buffer (BC_BlockBuf points here)
 
 BC_ExecBase	= 0
 BC_ExpBase	= 4
@@ -265,7 +267,9 @@ BC_DevName	= 124
 BC_DevNameBSTR	= 128
 BC_UnmountPrefixes = 132	;ptr to 0-terminated dostype-prefix list (UnmountPartitions); 0 = all
 BC_MountCfg	= 136		;APTR MountCfg (MountPartitions); 0 = cold-boot defaults
-BC_Sizeof	= 140
+BC_NodeHandler	= 140		;APTR resolved handler path C-string for the entry being
+				;mounted (0 = bind from FileSystem.resource only)
+BC_Sizeof	= 144
 
 BC_BUF_BYTES	= 512
 
@@ -274,7 +278,29 @@ DN_FSSM_OFF	= 44
 DN_ENVEC_OFF	= 60
 DN_BSTR_OFF	= 144
 DN_CTRL_OFF	= 176		;32-byte CONTROL BSTR (de_Control points here)
-DN_BLOB_SIZE	= 208
+DN_HDLR_OFF	= 208		;24-byte handler-path BSTR (dn_Handler points here when
+				;the node is bound by name rather than from
+				;FileSystem.resource); 4-aligned so the BPTR is
+				;representable. Copied per node rather than pointed
+				;at the caller's string, which it does not own past
+				;the call, and which DOS reads much later.
+DN_BLOB_SIZE	= 232
+DN_HDLR_MAX	= 23		;chars a DN_HDLR_OFF BSTR holds (24 - length byte)
+
+;-- hand-written offsets: let the assembler check the blob still tiles, and
+;   that both BSTR areas stay 4-aligned (a BPTR cannot address an odd byte).
+	ifne	DN_HDLR_OFF-(DN_CTRL_OFF+32)
+	fail	"DN_HDLR_OFF does not follow the CONTROL BSTR"
+	endc
+	ifne	DN_BLOB_SIZE-(DN_HDLR_OFF+24)
+	fail	"DN_BLOB_SIZE does not cover the handler BSTR"
+	endc
+	ifne	(DN_CTRL_OFF&3)|(DN_HDLR_OFF&3)
+	fail	"a blob BSTR is not 4-aligned (BPTR needs it)"
+	endc
+	ifne	DN_HDLR_MAX-(DN_BLOB_SIZE-DN_HDLR_OFF-1)
+	fail	"DN_HDLR_MAX does not match the handler BSTR slot"
+	endc
 
 ;===========================================================
 ; Constants: ROM strings used during scan
@@ -343,7 +369,7 @@ dbg_hunk_badid:
 ; (RDB/MBR/GPT/flat) into partition.resource, then cold-register
 ; the mountable RDB ones (AddBootNode / AddDosNode flags=0).
 ; MBR/GPT/flat entries are published only; DOS has not started, so
-; cfd.prefs cannot be read here.
+; no consumer configuration is readable here.
 ;
 ; Preserves d2-d7/a2-a5/a6
 ;===========================================================

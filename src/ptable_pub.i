@@ -25,7 +25,9 @@
 ;   for cold-boot defaults) supplies the global Flags + CONTROL and per-dostype
 ;   overrides; each entry resolves its Flags+Control by pe_DosType, the node gets
 ;   fssm_Flags + de_Control stamped, and the resolved values are recorded in
-;   pe_MountFlags / pe_Control.
+;   pe_MountFlags / pe_Control. mc_NodeDosType / mc_NodeHandler choose the
+;   filesystem for a synthesized-envec partition; the DosType the node ends up
+;   with is recorded in pe_NodeDosType.
 ;
 ; UnmountPartitions(deviceName: a1, unit: d0, prefixList: a0) -> d0 = removed
 ;   Runtime teardown; CALL FROM A PROCESS. prefixList = 0: ACTION_DIE +
@@ -35,17 +37,31 @@
 ;   pe_DosType matches; every other matched entry is marked absent
 ;   (PEB_PRESENT cleared, handler kept).
 
-;--- MountCfg (cfd -> MountPartitions in a0; 0 = cold-boot defaults) -------
+;--- MountCfg (-> MountPartitions in a0; 0 = cold-boot defaults) -----------
 ;
 ; Global Flags + CONTROL plus a per-dostype override table. ptable resolves
 ; each entry by (pe_DosType & $FFFFFF00) against the overrides, falling back to
 ; the global value. Strings are NUL-terminated C strings owned by the caller
 ; for the duration of the call (ptable copies what it retains).
 ;
+; mc_NodeDosType / mc_NodeHandler let the caller decide which filesystem serves
+; a partition this library synthesized an envec for, i.e. one that came from an
+; MBR or GPT table rather than from an RDB. They apply to FAT-family entries
+; only; an RDB entry keeps the DosType and the geometry recorded on the card.
+;
 mc_Flags	= 0			;ULONG global fssm_Flags
 mc_Control	= 4			;APTR  global CONTROL C-string (0 = none)
 mc_Overrides	= 8			;APTR  override table (0 = none)
-mc_Sizeof	= 12
+mc_NodeDosType	= 12			;ULONG DosType to stamp on the node instead of
+					;the one the scan chose. Naming one also fixes
+					;the node's window to that partition's own block
+					;range: a handler told to use a specific DosType
+					;is not one auto-detecting its own partition.
+					;0 = leave the envec exactly as scanned.
+mc_NodeHandler	= 16			;APTR  handler path C-string, e.g. "L:Something",
+					;used ONLY when no FileSysEntry matches the
+					;node's DosType. 0 = FileSystem.resource only.
+mc_Sizeof	= 20
 ;
 ; Override row (array terminated by ovr_Prefix = 0):
 ovr_Prefix	= 0			;ULONG dostype high 3 bytes ('DOS\0' etc); 0 = end
@@ -54,6 +70,11 @@ ovr_HasFlags	= 8			;UBYTE 1 = FLAGS_<fs> present (else use global)
 ;		  9..11			;(pad)
 ovr_Control	= 12			;APTR  override CONTROL C-string (0 = use global)
 ovr_Sizeof	= 16
+;
+; Keep ovr_Sizeof as it is. The library strides this table with its OWN idea of
+; the row size, so growing the row desynchronises a caller built against a
+; different header. New settings go in the mc_ block above, where a stale read
+; is merely a value the library does not act on.
 
 _LVOBootScanPartitions	= -30
 _LVOScanPartitions	= -36
@@ -111,7 +132,7 @@ PTR_Layout	= 94
 PTR_EntrySize	= 96
 PTR_Sizeof	= 98
 
-PTR_LAYOUT_V	= 2			;bump on every appended field
+PTR_LAYOUT_V	= 3			;bump on every appended field
 
 ;--- PartEntry (one per discovered partition; layout = PTR_LAYOUT_V) -------
 ;
@@ -145,7 +166,14 @@ pe_Control	= 212			;32 bytes embedded BSTR: resolved CONTROL string
 pe_Length	= 244			;UWORD allocated entry size, stamped = pe_Sizeof
 					;at publish; consumers bounds-check appended
 					;fields against it (see growth contract above)
-;		  246..259		;reserved for appended fields (zeroed)
+pe_NodeDosType	= 248			;ULONG DosType actually stamped into the node's
+					;DosEnvec (layout 3). NOT pe_DosType: that stays
+					;the DETECTED filesystem, so the Flags/CONTROL/
+					;UNMOUNT prefix matching keeps working, while the
+					;node may be mounted as whatever DosType the
+					;caller asked for in mc_NodeDosType.
+					;Resolved per mount; 0 until the entry is mounted.
+;		  252..259		;reserved for appended fields (zeroed)
 pe_Sizeof	= 260
 
 ;-- pe_ReadMode values (the device read command, see ptable_boot.s probe)
