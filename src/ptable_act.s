@@ -24,6 +24,8 @@
 ; The blob layout (shared by the cold and runtime mount paths):
 ;   [  0..43 ] DeviceNode   [ 44..59 ] FileSysStartupMsg
 ;   [ 60..143] DosEnvec     [144..175] dn_Name BSTR
+;   [176..207] CONTROL BSTR (de_Control)
+;   [208..231] handler-path BSTR (dn_Handler, when bound by name)
 ; The FileSysEntry patch (handler binding) is applied here, BEFORE
 ; the caller's Add*Node (expansion's FFS auto-attach would otherwise
 ; silently replace a custom handler).
@@ -111,6 +113,24 @@ _abb_ecp:
 	subq.l	#1,d3
 	bne.s	_abb_ecp
 
+;-- node DosType. The copy above still holds the DosType the scan chose, so a
+;   difference here IS the caller's substitution - no separate flag needed. A
+;   substituted DosType also means a fixed window: the handler was told which
+;   filesystem to be, so it is not the one auto-detecting its own partition.
+;   Safe because only a synthesized envec can differ (see _actResolveCfg), and
+;   that one is the fake 1-block-per-cylinder CHS this library writes.
+	lea	DN_ENVEC_OFF(a2),a1
+	move.l	pe_NodeDosType(a3),d0
+	cmp.l	DE_DOSTYPE*4(a1),d0
+	beq.s	_abb_nowin
+	move.l	d0,DE_DOSTYPE*4(a1)
+	move.l	pe_StartLBA(a3),d0
+	move.l	d0,DE_LowCyl*4(a1)
+	add.l	pe_BlockCount(a3),d0
+	subq.l	#1,d0
+	move.l	d0,DE_HighCyl*4(a1)
+_abb_nowin:
+
 ;-- CONTROL -> de_Control (only if the resolved pe_Control is non-empty):
 ;   copy the BSTR into the blob, point de_Control at it, raise TableSize >= 18
 	lea	pe_Control(a3),a0
@@ -134,23 +154,57 @@ _abb_ccp:
 	move.l	#18,(a1)
 _abb_noctrl:
 
-;-- bind the handler from FileSystem.resource (before Add*Node): exact dostype
+;-- bind the handler (before Add*Node): exact dostype in FileSystem.resource
 ;   first; else, for the FAT family only, the shared FAT handler matched by
 ;   family (high 3 bytes, any low byte) - one handler serves every FAT
-;   partition. Other filesystems must match exactly. No match -> do not mount.
+;   partition. Other filesystems must match exactly.
+;   Matching is on the NODE dostype, not the detected one: a node the caller
+;   asked to be another filesystem must not fall through the FAT family.
 	move.l	a5,a6			;ExecBase for _bootFindFSEntry
-	move.l	pe_DosType(a3),d0
+	move.l	pe_NodeDosType(a3),d0
 	bsr	_bootFindFSEntry
 	tst.l	d0
-	bne.s	_abb_fse
-	move.l	pe_DosType(a3),d0
+	bne.w	_abb_fse
+	move.l	pe_NodeDosType(a3),d0
 	and.l	#$FFFFFF00,d0
-	cmp.l	#$46415400,d0		;FAT family only (shared fat95 seglist)
-	bne.s	_abb_nofs
-	move.l	pe_DosType(a3),d0
+	cmp.l	#DOSTYPE_FAT,d0		;FAT is shareable: one registered handler
+					;serves any FAT\x dostype (see ptable_fs.s)
+	bne.s	_abb_path
+	move.l	pe_NodeDosType(a3),d0
 	bsr	_bootFindFSFamily
 	tst.l	d0
-	bne.s	_abb_fse
+	bne.w	_abb_fse
+
+;-- nothing registered for this dostype: fall back to the handler path the
+;   caller supplied, if any. dn_SegList stays 0, so DOS LoadSegs dn_Handler on
+;   first reference - the DEVS:DOSDrivers mechanism. Setting dn_Handler also
+;   keeps expansion's FFS auto-attach off what would be an empty DeviceNode.
+_abb_path:
+	move.l	BC_NodeHandler(a4),d0
+	beq.s	_abb_nofs
+	move.l	d0,a0			;a0 = handler path C-string
+	lea	DN_HDLR_OFF(a2),a1
+	addq.l	#1,a1			;past the length byte
+	moveq.l	#0,d0			;d0 = length
+_abb_hcp:
+	move.b	(a0)+,d3
+	beq.s	_abb_hlen
+	cmp.b	#DN_HDLR_MAX,d0
+	bhs.s	_abb_hlen		;clamp: the string is the caller's, not ours
+	move.b	d3,(a1)+
+	addq.b	#1,d0
+	bra.s	_abb_hcp
+_abb_hlen:
+	tst.b	d0
+	beq.s	_abb_nofs		;an empty path is no path
+	lea	DN_HDLR_OFF(a2),a1
+	move.b	d0,(a1)			;length byte
+	move.l	a1,d0
+	lsr.l	#2,d0
+	move.l	d0,16(a2)		;dn_Handler = BPTR (dn_SegList left 0)
+	move.l	a2,d0
+	movem.l	(sp)+,d2-d3/a2/a6
+	rts
 _abb_nofs:
 ;-- no handler for this dostype: free the blob and fail so the caller leaves
 ;   the entry present-only (P---) instead of marking a handler-less node MOUNTED
@@ -174,8 +228,10 @@ _abb_fail:
 	rts
 
 ;===========================================================
-; _actResolveCfg: resolve Flags + Control for one entry from BC_MountCfg.
-; In : a3 = entry, a4 = &BootCtx ; writes pe_MountFlags + pe_Control(a3).
+; _actResolveCfg: resolve Flags, Control, node DosType and handler for one
+; entry from BC_MountCfg.
+; In : a3 = entry, a4 = &BootCtx
+; Out: pe_MountFlags + pe_Control + pe_NodeDosType (a3), BC_NodeHandler (a4)
 ; cfg 0 -> flags 0, no control. Per-dostype override (matched on
 ; pe_DosType & $FFFFFF00) replaces the global Flags/Control when present.
 ;===========================================================
@@ -232,6 +288,34 @@ _arc_clen:
 _arc_empty:
 	clr.b	(a1)			;empty control
 _arc_done:
+
+;-- node DosType + handler path. Default is the DosType the scan already put in
+;   the envec and no path, so a caller that configures nothing changes nothing.
+;   Both settings apply ONLY to an entry whose envec this library synthesized
+;   and which we detected as FAT:
+;     - not PES_RDB, because an RDB envec is the card's own, its LowCyl/HighCyl
+;       are real cylinders against real Surfaces/BlocksPerTrk, and pe_StartLBA /
+;       pe_BlockCount are blocks. Writing one into the other would be nonsense.
+;     - FAT family, because that is the scope this knob is defined for; another
+;       filesystem's node must not be handed a FAT handler's path.
+	move.l	pe_Envec+DE_DOSTYPE*4(a3),d0
+	moveq.l	#0,d1
+	move.l	BC_MountCfg(a4),d2
+	beq.s	_arc_nstore		;cold / no cfg
+	cmp.b	#PES_RDB,pe_Source(a3)
+	beq.s	_arc_nstore
+	move.l	pe_DosType(a3),d3
+	and.l	#$FFFFFF00,d3
+	cmp.l	#DOSTYPE_FAT,d3
+	bne.s	_arc_nstore
+	move.l	d2,a0
+	move.l	mc_NodeHandler(a0),d1	;path (0 = FileSystem.resource only)
+	move.l	mc_NodeDosType(a0),d3
+	beq.s	_arc_nstore		;no DosType named -> envec stays as scanned
+	move.l	d3,d0
+_arc_nstore:
+	move.l	d0,pe_NodeDosType(a3)
+	move.l	d1,BC_NodeHandler(a4)
 	movem.l	(sp)+,d0-d4/a0-a1
 	rts
 
@@ -255,7 +339,7 @@ _amt_no:
 
 ;===========================================================
 ; _actCold: cold-register the mountable RDB entries for this unit. MBR/GPT/flat
-; entries stay published only; the DOS-time agent mounts them with cfd.prefs.
+; entries stay published only; a DOS-time consumer mounts them with its own config.
 ; In : a4 = &BootCtx (BC_ExpBase, BC_ConfigDev, BC_DevNameBSTR set),
 ;      a5 = ExecBase; PTR_Lock held
 ; Out: d0 = entries registered; BC_HaveNodes/BC_PartCount updated
@@ -286,7 +370,7 @@ _acd_walk:
 	bra.w	_acd_skipdbg
 _acd_srcchk:
 ;-- cold boot registers RDB only. MBR/GPT/flat entries stay published and are
-;   mounted by the DOS-time agent, which reads cfd.prefs.
+;   mounted later by a DOS-time consumer, once its configuration is readable.
 	cmpi.b	#PES_RDB,pe_Source(a3)
 	beq.s	_acd_mntchk
 	ifd	DEBUG
@@ -476,9 +560,10 @@ _aum_walk:
 	beq.w	_aum_drop		;published-only (no handler) -> free entry
 ;-- a MOUNTED entry: prefix list decides tear-down vs keep-handler
 	move.l	BC_UnmountPrefixes(a4),d0
-	beq.s	_aum_teardown		;no list -> tear down + free (documented
-					;API; cfd routes an empty UNMOUNT list to
-					;MarkAbsent, so no shipping caller hits this)
+	beq.s	_aum_teardown		;no list -> tear down + free every mounted
+					;entry for the device+unit (documented API;
+					;a caller wanting keep-everything calls
+					;MarkAbsent instead)
 	move.l	pe_DosType(a3),d5
 	and.l	#$FFFFFF00,d5
 	move.l	d0,a0
