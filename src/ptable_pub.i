@@ -61,7 +61,14 @@ mc_NodeDosType	= 12			;ULONG DosType to stamp on the node instead of
 mc_NodeHandler	= 16			;APTR  handler path C-string, e.g. "L:Something",
 					;used ONLY when no FileSysEntry matches the
 					;node's DosType. 0 = FileSystem.resource only.
-mc_Sizeof	= 20
+mc_Size		= 20			;ULONG the caller's mc_Sizeof. MountCfg's
+					;de_TableSize: a field appended in a later
+					;release is read only when the caller's
+					;declared size covers it, so the struct grows
+					;by appending a field and bumping mc_Sizeof.
+					;The 2.0 fields above are baseline and are
+					;always read.
+mc_Sizeof	= 24
 ;
 ; Override row (array terminated by ovr_Prefix = 0):
 ovr_Prefix	= 0			;ULONG dostype high 3 bytes ('DOS\0' etc); 0 = end
@@ -73,8 +80,7 @@ ovr_Sizeof	= 16
 ;
 ; Keep ovr_Sizeof as it is. The library strides this table with its OWN idea of
 ; the row size, so growing the row desynchronises a caller built against a
-; different header. New settings go in the mc_ block above, where a stale read
-; is merely a value the library does not act on.
+; different header. New settings go in the mc_ block above, behind mc_Size.
 
 _LVOBootScanPartitions	= -30
 _LVOScanPartitions	= -36

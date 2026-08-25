@@ -114,6 +114,8 @@ BootPri, stored in the partition environment, does not decide bootability; it or
 
 `mc_NodeDosType` and `mc_NodeHandler` decide **which filesystem serves a partition** whose envec this library synthesized, i.e. one from an MBR or GPT table rather than an RDB. They are described under [Choosing the filesystem](#choosing-the-filesystem) below.
 
+The struct ends with `mc_Size`, the caller's own `mc_Sizeof` - MountCfg's `de_TableSize`: a field appended in a later release is read only when the caller's declared size covers it, which is how the struct grows without breaking a caller built against an older header. The 2.0 fields themselves are baseline and always read.
+
 For `compactflash.device` these values come from `ENV:cfd.prefs`: the `FLAGS` and `CONTROL` keys, global and `_<fs>` per filesystem. So to change how hotplugged cards mount, you edit `cfd.prefs`, not `ptable.library`. The resolved values are recorded per partition and shown live by `lsptres` in its `MFlg` and `Ctrl` columns.
 
 The full user-facing reference for the `cfd.prefs` keys, plus deployment defaults and the removable-media model, is `compactflash.device`'s automount guide (`automount.guide`).

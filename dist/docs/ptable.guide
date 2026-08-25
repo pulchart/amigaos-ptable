@@ -380,6 +380,12 @@ cold-boot defaults.
 partition@{ub} whose envec this library synthesized, i.e. one from an MBR or
 GPT table rather than an RDB. They are described under @{"Choosing the filesystem" link choosing_the_filesystem} below.
 
+The struct ends with @{fg shine}mc_Size@{fg text} , the caller's own @{fg shine}mc_Sizeof@{fg text} - MountCfg's
+@{fg shine}de_TableSize@{fg text} : a field appended in a later release is read only when the
+caller's declared size covers it, which is how the struct grows without
+breaking a caller built against an older header. The 2.0 fields
+themselves are baseline and always read.
+
 For @{fg shine}compactflash.device@{fg text} these values come from @{fg shine}ENV:cfd.prefs@{fg text} : the @{fg shine}FLAGS@{fg text}
 and @{fg shine}CONTROL@{fg text} keys, global and @{fg shine}_<fs>@{fg text} per filesystem. So to change how
 hotplugged cards mount, you edit @{fg shine}cfd.prefs@{fg text} , not @{fg shine}ptable.library@{fg text} . The
