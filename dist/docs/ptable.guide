@@ -380,12 +380,6 @@ cold-boot defaults.
 partition@{ub} whose envec this library synthesized, i.e. one from an MBR or
 GPT table rather than an RDB. They are described under @{"Choosing the filesystem" link choosing_the_filesystem} below.
 
-The struct ends with @{fg shine}mc_Size@{fg text} , the caller's own @{fg shine}mc_Sizeof@{fg text} - MountCfg's
-@{fg shine}de_TableSize@{fg text} : a field appended in a later release is read only when the
-caller's declared size covers it, which is how the struct grows without
-breaking a caller built against an older header. The 2.0 fields
-themselves are baseline and always read.
-
 For @{fg shine}compactflash.device@{fg text} these values come from @{fg shine}ENV:cfd.prefs@{fg text} : the @{fg shine}FLAGS@{fg text}
 and @{fg shine}CONTROL@{fg text} keys, global and @{fg shine}_<fs>@{fg text} per filesystem. So to change how
 hotplugged cards mount, you edit @{fg shine}cfd.prefs@{fg text} , not @{fg shine}ptable.library@{fg text} . The
@@ -644,8 +638,9 @@ Notes a consumer needs:
     @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} , and @{fg shine}mc_NodeDosType@{fg text} / @{fg shine}mc_NodeHandler@{fg text} . The override
     row is deliberately not grown for new settings: the library strides that table
     with its own idea of the row size, so a caller built against a different
-    header would desynchronise. New settings go in the @{fg shine}mc_@{fg text} block, where a stale
-    read is only a value the library does not act on.
+    header would desynchronise. New settings go in the @{fg shine}mc_@{fg text} block, behind @{fg shine}mc_Size@{fg text} -
+    the caller's own @{fg shine}mc_Sizeof@{fg text} , MountCfg's @{fg shine}de_TableSize@{fg text} : a field appended in a
+    later release is read only when the caller's declared size covers it.
   * @{fg shine}prefixList@{fg text} is a 0-terminated list of dostype high three bytes, e.g. @{fg shine}$50465300@{fg text}
     for @{fg shine}PFS@{fg text} .
   * @{fg shine}BootScanPartitions@{fg text} also registers a synthetic ConfigDev (Vendor ID @{fg shine}65535@{fg text} ,
@@ -665,7 +660,7 @@ Notes a consumer needs:
 @{b}@{fg shine}partition.resource@{fg text} layout.@{ub} Readers walk @{fg shine}ptr_PartList@{fg text} under @{fg shine}Forbid()@{fg text} or
 take @{fg shine}ptr_Lock@{fg text} . @{fg shine}OpenResource@{fg text} cannot negotiate versions, so the only
 runtime layout signal is the pair of stamps in the header, @{fg shine}ptr_Layout@{fg text}
-(currently @{fg shine}PTR_LAYOUT_V = 2@{fg text} ) and @{fg shine}ptr_EntrySize@{fg text} , plus @{fg shine}pe_Length@{fg text} per
+(currently @{fg shine}PTR_LAYOUT_V = 3@{fg text} ) and @{fg shine}ptr_EntrySize@{fg text} , plus @{fg shine}pe_Length@{fg text} per
 entry. Fields are appended only, never inserted, because @{fg shine}lsptres@{fg text} and
 fat95 ship separately-built offset mirrors; a consumer that needs a
 newer field checks the stamp and degrades if it is older. The full field
