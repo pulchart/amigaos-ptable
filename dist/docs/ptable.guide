@@ -636,7 +636,9 @@ Notes a consumer needs:
     nothing at all if the lock is busy, so a return of 0 does not mean there were
     no entries.
   * @{fg shine}RegisterPartition@{fg text} matches on device, unit and start block. @{fg shine}control@{fg text} is a BSTR
-    pointer, @{fg shine}0@{fg text} for none.
+    pointer, @{fg shine}0@{fg text} for none. @{fg shine}nodeDosType@{fg text} (d5) records the DosType the handler mounted
+    with into @{fg shine}pe_NodeDosType@{fg text} , @{fg shine}0@{fg text} meaning unknown. Register inputs cannot be gated
+    by a declared size the way @{fg shine}mc_@{fg text} fields are, so a future input means a new LVO.
   * @{fg shine}cfg@{fg text} is a @{fg shine}MountCfg@{fg text} (or @{fg shine}0@{fg text} for cold-boot defaults): global @{fg shine}mc_Flags@{fg text} and
     @{fg shine}mc_Control@{fg text} plus a 0-terminated per-dostype override table, resolved by
     @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} , and @{fg shine}mc_NodeDosType@{fg text} / @{fg shine}mc_NodeHandler@{fg text} . The override

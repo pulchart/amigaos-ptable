@@ -42,7 +42,8 @@
     @{fg shine}FileSystem.resource@{fg text} has none ( @{fg shine}mc_NodeHandler@{fg text} ). Unset means unchanged; RDB
     partitions are unaffected. See @{"  ptable.guide  " link "ptable.guide/Main"} .
   * @{b}@{fg shine}lsptres@{fg text}@{ub} shows the DosType a mounted partition actually carries in its @{fg shine}DosType@{fg text}
-    column.
+    column. A handler that mounts statically can record its DosType too, via a new
+    @{fg shine}RegisterPartition@{fg text} input.
 
 @{b}Tools@{ub}
 
