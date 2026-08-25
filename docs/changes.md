@@ -11,7 +11,7 @@ _Components in this release_:
 
 - **Unified partition scanning.** One scanner parses RDB, MBR, GPT, and flat (whole-disk FAT) partition tables and publishes every partition into a shared `partition.resource`, now consumed by both `compactflash.device` and `fat95` instead of each carrying its own parser. See [ptable.md](ptable.md).
 - **Selectable filesystem for MBR/GPT FAT partitions.** The consumer can name the DosType to mount them with (`mc_NodeDosType`) and a handler to load when `FileSystem.resource` has none (`mc_NodeHandler`). Unset means unchanged; RDB partitions are unaffected. See [ptable.md](ptable.md).
-- **`lsptres`** shows the DosType a mounted partition actually carries in its `DosType` column.
+- **`lsptres`** shows the DosType a mounted partition actually carries in its `DosType` column. A handler that mounts statically can record its DosType too, via a new `RegisterPartition` input.
 
 ##### Tools
 

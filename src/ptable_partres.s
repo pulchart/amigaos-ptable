@@ -482,7 +482,13 @@ _up_ret:
 
 ;===========================================================
 ; RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
-;               nameBSTR:a0, devNode:a2, LibBase:a6) -> d0 = 1/0
+;               nameBSTR:a0, devNode:a2, flags:d3, control:d4,
+;               nodeDosType:d5, LibBase:a6) -> d0 = 1/0
+;
+; nodeDosType is the DosType the handler mounted with, recorded in
+; pe_NodeDosType for visibility (lsptres); 0 = unknown. Register inputs
+; cannot be gated by a declared size the way mc_ fields are, so a future
+; input here means a new LVO, not another register.
 ;
 ; Overlay a real mount onto an already-published entry (matched by
 ; device+unit+start+count): set its name to the handler's real DOS name,
@@ -490,8 +496,9 @@ _up_ret:
 ;===========================================================
 RegisterPartition:
 	movem.l	d2-d7/a2-a6,-(sp)
-	move.l	d4,-(sp)		;[4(sp)] = control APTR input (BSTR or 0)
-	move.l	d3,-(sp)		;[0(sp)] = flags input
+	move.l	d4,-(sp)		;[8(sp)] = control APTR input (BSTR or 0)
+	move.l	d3,-(sp)		;[4(sp)] = flags input
+	move.l	d5,-(sp)		;[0(sp)] = nodeDosType input (0 = unknown)
 	move.l	d0,d3			;d3 = unit
 	move.l	d1,d4			;d4 = startLBA
 	move.l	d2,d5			;d5 = blockCount
@@ -551,12 +558,15 @@ _rm_nameset:
 	lea	pe_MountName(a0),a0
 	bsr	_bootDebugBStr
 	endc
-;-- record the Flags + Control the handler actually opened with (visibility)
+;-- record the Flags, Control and DosType the handler actually mounted with
+;   (visibility: lsptres shows all three)
 	move.l	d7,a0
-	move.l	(sp),d0			;flags input
+	move.l	4(sp),d0		;flags input
 	move.l	d0,pe_MountFlags(a0)
+	move.l	(sp),d0			;nodeDosType input (0 = unknown)
+	move.l	d0,pe_NodeDosType(a0)
 	lea	pe_Control(a0),a1
-	move.l	4(sp),d0		;control APTR (0 = none)
+	move.l	8(sp),d0		;control APTR (0 = none)
 	beq.s	_rm_noctl
 	move.l	d0,a2			;src BSTR
 	moveq.l	#0,d0
@@ -583,7 +593,7 @@ _rm_unlock:
 	bsr	_partUnlockRes
 _rm_unlocked:
 	move.l	d2,d0
-	addq.l	#8,sp			;drop saved flags + control inputs
+	lea	12(sp),sp		;drop the three saved inputs
 	movem.l	(sp)+,d2-d7/a2-a6
 	rts
 

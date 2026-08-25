@@ -29,7 +29,7 @@ lsptres >SER:      ; forward output over the serial line
 | Part | Partition index within the card (0-based). |
 | Src | Partition scheme: `MBR`, `GPT`, `RDB`, or `FLT` (flat / superfloppy). |
 | Pri | Boot priority. |
-| DosType | The DosType the mount uses, as hex. For a mounted partition this is the DosType its node carries, which is `0x464154FF` for a FAT partition on the auto-detect scheme and whatever was configured when a filesystem was chosen explicitly. An unmounted partition has no node, so it shows the DosType detected on the card (`0x46415400` for FAT). Needs a layout 3 publisher, otherwise the detected DosType is always shown. |
+| DosType | The DosType the mount uses, as hex. For a mounted partition this is the DosType its node carries, which is `0x464154FF` for a FAT partition on the auto-detect scheme, whatever was configured when a filesystem was chosen explicitly, or what the handler itself registered for a statically mounted one. An unmounted partition has no node, so it shows the DosType detected on the card (`0x46415400` for FAT). Needs a layout 3 publisher, otherwise the detected DosType is always shown. |
 | Text | The DosType as four-character text; non-printable bytes (e.g. a trailing `\0`) show as `.`. |
 | Flags | First char: `P` present, `I` invalid (a card is in but has no partition for this mounted slot), `-` absent. Then `B` bootable, `N` nomount, `M` mounted; `-` for an absent bit. |
 | MFlg | Mount Flags the partition was mounted with: cfd's automount resolves these from `cfd.prefs` (`FLAGS`), or a handler that mounts it statically records the value it opened the device with. |

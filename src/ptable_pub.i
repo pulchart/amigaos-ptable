@@ -90,11 +90,14 @@ _LVORegisterPartition	= -54
 _LVOMarkAbsent		= -60
 ;
 ; RegisterPartition(deviceName: a1, unit: d0, startLBA: d1, blockCount: d2,
-;               nameBSTR: a0, devNode: a2, flags: d3, control: d4)
-;                                                 -> d0 = 1 updated / 0 not found
+;               nameBSTR: a0, devNode: a2, flags: d3, control: d4,
+;               nodeDosType: d5)                  -> d0 = 1 updated / 0 not found
 ;   Overlay a real mount onto an already-published entry: a handler that
 ;   serves a volume calls this so the resource shows the volume's real DOS
 ;   name (dn_Name) and MOUNTED state instead of the synthesized scan name.
+;   nodeDosType is the DosType the handler mounted with (-> pe_NodeDosType,
+;   0 = unknown). Register inputs cannot be gated by a declared size the way
+;   mc_ fields are, so a future input here means a new LVO.
 ;   flags + control (d4 = APTR to a BSTR, 0 = none) are the values the handler
 ;   actually opened the device with; they are recorded in pe_MountFlags /
 ;   pe_Control so lsptres reflects the live mount on every path (including the
@@ -178,7 +181,8 @@ pe_NodeDosType	= 248			;ULONG DosType actually stamped into the node's
 					;UNMOUNT prefix matching keeps working, while the
 					;node may be mounted as whatever DosType the
 					;caller asked for in mc_NodeDosType.
-					;Resolved per mount; 0 until the entry is mounted.
+					;Resolved per mount, or recorded by
+					;RegisterPartition; 0 until the entry is mounted.
 ;		  252..259		;reserved for appended fields (zeroed)
 pe_Sizeof	= 260
 
