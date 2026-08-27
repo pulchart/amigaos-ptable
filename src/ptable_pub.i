@@ -37,6 +37,11 @@
 ;   high 3 bytes, e.g. $50465300 'PFS'): tear down only entries whose
 ;   pe_DosType matches; every other matched entry is marked absent
 ;   (PEB_PRESENT cleared, handler kept).
+;   Static mounts are exempt either way: an entry whose DOS node this
+;   library did not build (pe_BlobPtr = 0, i.e. a hand-mounted DOSDriver
+;   claimed via RegisterPartition or adopted by the mount-time name reuse)
+;   is never torn down, only marked absent; removing that node is the
+;   user's call, not a card event's.
 
 ;--- MountCfg (-> MountPartitions in a0; 0 = cold-boot defaults) -----------
 ;

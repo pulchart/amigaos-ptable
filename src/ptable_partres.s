@@ -50,6 +50,8 @@ dbg_pt_reuse:
 	dc.b	"[PT] reusing handler ",0
 dbg_pt_unmounted:
 	dc.b	"[PT] unmounted ",0
+dbg_pt_static:
+	dc.b	"[PT] static mount kept ",0
 dbg_pt_mountedas:
 	dc.b	"[PT] mounted as ",0
 dbg_pt_absent:
