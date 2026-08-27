@@ -94,13 +94,35 @@ _brh_alloc_loop:
 	cmpa.l	a3,a2
 	bhs.w	_brh_teardown
 	move.l	(a2)+,d6
+;-- bits 31/30 of a size-table entry are memory attributes: CHIP, FAST, or
+;   both = an explicit MEMF longword follows (which must be skipped even
+;   when its attributes are not honoured)
+	move.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
+	move.l	d6,d0
+	and.l	#$C0000000,d0
+	beq.s	_brh_attr_done
+	cmp.l	#$C0000000,d0
+	bne.s	_brh_attr_bits
+	cmpa.l	a3,a2
+	bhs.w	_brh_teardown
+	move.l	(a2)+,d1		;explicit MEMF longword
+	or.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
+	bra.s	_brh_attr_done
+_brh_attr_bits:
+	btst	#30,d6
+	beq.s	_brh_attr_fast
+	or.l	#MEMF_CHIP,d1
+_brh_attr_fast:
+	btst	#31,d6
+	beq.s	_brh_attr_done
+	or.l	#MEMF_FAST,d1
+_brh_attr_done:
 	and.l	#$3FFFFFFF,d6
 	move.l	d6,d0
 	lsl.l	#2,d0
 	addq.l	#8,d0
 	cmp.l	#$100000,d0		;sanity: cap 1 MiB / hunk
 	bhi.w	_brh_teardown
-	move.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
 	move.l	BC_ExecBase(a4),a6
 	jsr	AllocMem(a6)
 	tst.l	d0

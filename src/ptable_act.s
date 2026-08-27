@@ -32,6 +32,10 @@
 ;===========================================================
 _actBuildBlob:
 	movem.l	d2-d3/a2/a6,-(sp)
+;-- no cached device-name BSTR (its alloc failed): a node would carry
+;   fssm_Device = 0 and the handler would dereference a BSTR at address 0
+	move.l	BC_DevNameBSTR(a4),d0
+	beq.w	_abb_fail
 	move.l	#DN_BLOB_SIZE,d0
 	move.l	#MEMF_PUBLIC+MEMF_CLEAR+MEMF_REVERSE,d1
 	move.l	a5,a6
@@ -405,6 +409,8 @@ _acd_mntchk:
 	move.l	d6,a0
 	move.l	BC_ConfigDev(a4),a1
 	jsr	AddBootNode(a6)
+	tst.l	d0
+	beq.w	_acd_addfail
 	bra.s	_acd_reg
 _acd_dos:
 	ifd	DEBUG
@@ -418,6 +424,8 @@ _acd_dos:
 	moveq.l	#0,d1
 	move.l	d6,a0
 	jsr	AddDosNode(a6)
+	tst.l	d0
+	beq.w	_acd_addfail
 _acd_reg:
 	move.l	d6,pe_DevNode(a3)
 	move.l	d6,pe_BlobPtr(a3)
@@ -430,6 +438,13 @@ _acd_reg:
 	ifd	DEBUG
 	bra.s	_acd_next		;skip the NOMOUNT trace below
 	endc
+_acd_addfail:
+;-- expansion could not link the node: free the blob, keep the entry published
+	move.l	d6,a1
+	move.l	#DN_BLOB_SIZE,d0
+	move.l	a5,a6
+	jsr	FreeMem(a6)
+	bra.w	_acd_next
 _acd_skipdbg:
 	ifd	DEBUG
 	lea	dbg_boot_part_skip(pc),a0
@@ -482,7 +497,23 @@ _amo_walk:
 	lea	pe_NameB(a3),a0
 	bsr	_bootFindNode		;d0 = existing DeviceNode or 0
 	tst.l	d0
-	beq.s	_amo_create
+	beq.w	_amo_create
+;-- reuse only an auto-detect node (de_LowCyl = 0): a fixed-window node
+;   belongs to one specific partition, and binding another entry to it would
+;   serve the old card's blocks and double-reference one DeviceNode (whose
+;   teardown would then free a blob the other entry still points at)
+	move.l	d0,a0
+	move.l	28(a0),d1		;dn_Startup (BPTR FSSM)
+	beq.w	_amo_create		;no startup -> not one of ours
+	lsl.l	#2,d1
+	move.l	d1,a0
+	move.l	8(a0),d1		;fssm_Environ (BPTR envec)
+	beq.w	_amo_create
+	lsl.l	#2,d1
+	move.l	d1,a0
+	tst.l	DE_LowCyl*4(a0)
+	bne.w	_amo_create		;fixed window -> build a fresh node
+	bsr	_actResolveCfg		;record MFlg/Ctrl/NodeDosType for the entry
 	move.l	d0,pe_DevNode(a3)
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
@@ -506,6 +537,8 @@ _amo_create:
 	moveq.l	#ADNF_STARTPROC,d1
 	move.l	d6,a0
 	jsr	AddDosNode(a6)
+	tst.l	d0
+	beq.s	_amo_addfail
 	ifd	DEBUG
 	lea	dbg_pt_mounted(pc),a0
 	bsr	_bootDebug
@@ -519,6 +552,13 @@ _amo_create:
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
 	addq.l	#1,d7
+	bra.s	_amo_next
+_amo_addfail:
+;-- expansion could not link the node: free the blob, keep the entry published
+	move.l	d6,a1
+	move.l	#DN_BLOB_SIZE,d0
+	move.l	a5,a6
+	jsr	FreeMem(a6)
 _amo_next:
 	move.l	d4,a3
 	bra.w	_amo_walk
@@ -617,6 +657,8 @@ _aum_out:
 ; Preserves d2/d3/d5-d7/a2/a4/a5, clobbers d0-d1/d4/a0-a1/a6.
 ;===========================================================
 _actTeardownEntry:
+	move.l	BC_DosBase(a4),d0	;without dos.library the node cannot be
+	beq.s	_ate_keep		;unlinked, so do not kill the handler either
 	move.l	pe_DevNode(a3),a0
 	bsr	_partActionDie
 	tst.l	d0
@@ -625,9 +667,7 @@ _ate_keep:
 	moveq.l	#0,d0			;still alive -> keep the mount intact
 	rts
 _ate_died:
-	move.l	BC_DosBase(a4),d0
-	beq.s	_ate_keep		;no dos.library -> cannot unlink: keep it all
-	move.l	d0,a6
+	move.l	BC_DosBase(a4),a6
 ;-- never block on the DOS list: dos.library holds it across the packet
 ;   round-trip that starts a handler, and we hold PTR_Lock here, so a
 ;   blocking LockDosList can close the circle. Attempt, back off, retry.
@@ -793,8 +833,13 @@ _pad_poll:
 	moveq.l	#0,d0			;no answer in ~3 s -> keep the mount
 	bra.s	_pad_out		;(block stays: the handler still owns it)
 _pad_refused:
+;-- the refusal reply is in hand (a3 != 0), so the handler owns nothing of
+;   the block any more: release it, unlike the unanswered-timeout case above
+	move.l	a2,a1
+	move.l	#PAD_PKT_SIZE,d0
+	jsr	FreeMem(a6)
 	moveq.l	#0,d0			;it will not go -> keep the mount
-	bra.s	_pad_out		;(block stays: it is alive, see the header)
+	bra.s	_pad_out
 _pad_gone:
 ;-- dead: pick up the answer if it is still queued, and release the
 ;   block only here, where nothing can touch it any more
@@ -812,9 +857,10 @@ _pad_out:
 
 ;-----------------------------------------------------------
 ; _padDrain: collect the ACTION_DIE reply if it is back and read the
-; verdict out of it. It never releases the block: that happens only once
-; dol_Task has reached zero, because a handler that is part-way through
-; shutting down must not have memory it was handed recycled under it.
+; verdict out of it. It never releases the block itself: the caller frees it
+; once the reply is in hand (refusal) or dol_Task has reached zero (death),
+; because a handler that is part-way through shutting down must not have
+; memory it was handed recycled under it.
 ;   DOSFALSE plus an error code in dp_Res2 is the documented refusal.
 ;   DOSFALSE with dp_Res2 = 0 carries no information: handlers written
 ;   before the convention answer that way and still exit, so it has to

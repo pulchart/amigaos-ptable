@@ -488,6 +488,7 @@ bs_close_unit:
 	move.l	d0,a6
 	move.l	BC_ConfigDev(a4),a0
 	jsr	AddConfigDev(a6)
+	clr.l	BC_ConfigDev(a4)	;owned by expansion now
 
 bs_close:
 	move.l	BC_ExecBase(a4),a6
@@ -502,6 +503,13 @@ bs_close1:
 	jsr	CloseLibrary(a6)
 
 bs_cleanup:
+;-- a ConfigDev that was never handed to AddConfigDev is still ours
+	move.l	BC_ConfigDev(a4),d0
+	beq.s	bs_nocdfree
+	move.l	d0,a1
+	move.l	#CD_SIZEOF,d0
+	jsr	FreeMem(a6)
+bs_nocdfree:
 	moveq.l	#0,d6
 	move.b	BC_PartCount(a4),d6	;return value = partitions registered
 	ifd	DEBUG
@@ -918,10 +926,13 @@ _bmb_fail:
 ; Preserves a4/a5/a6/d7 (the caller relies on a5/d7).
 ;===========================================================
 _bootDedupName:
-	movem.l	d0-d6/a0-a3,-(sp)
+	movem.l	d0-d6/a0-a3/a6,-(sp)
 	move.l	BC_ExpBase(a4),a3	;a3 = ExpansionBase
 	move.l	a3,d0
 	beq.s	_bdn_ret		;no exp.lib -> nothing to check
+;-- other tasks mutate eb_MountList under Forbid; walk it the same way
+	move.l	(_AbsExecBase).w,a6
+	jsr	Forbid(a6)
 
 	lea	DN_BSTR_OFF(a5),a0
 	moveq.l	#0,d5
@@ -957,8 +968,10 @@ _bdn_dup:
 	bra.s	_bdn_retry
 
 _bdn_unique:
+	move.l	(_AbsExecBase).w,a6
+	jsr	Permit(a6)
 _bdn_ret:
-	movem.l	(sp)+,d0-d6/a0-a3
+	movem.l	(sp)+,d0-d6/a0-a3/a6
 	rts
 
 ;===========================================================
@@ -971,16 +984,20 @@ _bdn_ret:
 ; Preserves a4/a5/a6.
 ;===========================================================
 _bootFindNode:
-	movem.l	d1/a0-a3,-(sp)
+	movem.l	d1/a0-a3/a6,-(sp)
 	move.l	a0,a3			;a3 = wanted name BSTR
 	move.l	BC_ExpBase(a4),a1
 	move.l	a1,d0
 	beq.s	_bfn_no			;no exp.lib
+;-- other tasks mutate eb_MountList under Forbid; walk it the same way
+	move.l	(_AbsExecBase).w,a6
+	jsr	Forbid(a6)
+	move.l	BC_ExpBase(a4),a1
 	lea	74(a1),a0
 	move.l	(a0),a1			;a1 = first BootNode (lh_Head)
 _bfn_walk:
 	move.l	(a1),d0			;ln_Succ
-	beq.s	_bfn_no			;tail -> not found
+	beq.s	_bfn_no2		;tail -> not found (drop Forbid)
 	move.l	16(a1),d1		;d1 = bn_DeviceNode
 	beq.s	_bfn_next
 	move.l	d1,a2
@@ -1015,11 +1032,14 @@ _bfn_next:
 	bra.s	_bfn_walk
 _bfn_hit:
 	move.l	d1,d0			;d0 = DeviceNode
+	jsr	Permit(a6)
 	bra.s	_bfn_done
+_bfn_no2:
+	jsr	Permit(a6)
 _bfn_no:
 	moveq.l	#0,d0
 _bfn_done:
-	movem.l	(sp)+,d1/a0-a3
+	movem.l	(sp)+,d1/a0-a3/a6
 	rts
 
 ;===========================================================

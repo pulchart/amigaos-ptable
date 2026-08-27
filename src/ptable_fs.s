@@ -63,6 +63,8 @@ _bao_cnt_loop:
 	cmpi.l	#LSEG_ID,(a0)
 	bne.w	_bao_free_fshd
 	add.l	#RDB_BLOCK_BYTES-lsb_LoadData,d4
+	cmp.l	#$100000,d4		;cap at 1 MiB; tested inside the loop so a
+	bhi.w	_bao_free_fshd		;cyclic lsb_Next chain cannot hang cold boot
 	move.l	lsb_Next(a0),d0
 	move.l	d0,d5
 	addq.l	#1,d0
@@ -70,8 +72,6 @@ _bao_cnt_loop:
 
 	tst.l	d4
 	beq.w	_bao_free_fshd
-	cmp.l	#$100000,d4		;cap at 1 MiB
-	bhi.w	_bao_free_fshd
 
 ;-- allocate SegList buffer (size + nextBPTR + payload + 0)
 	move.l	d4,d0
@@ -84,7 +84,7 @@ _bao_cnt_loop:
 	move.l	d0,a2
 
 	move.l	d4,d0
-	addq.l	#8,d0
+	add.l	#12,d0			;full allocation size (as hunk segs record)
 	move.l	d0,(a2)
 
 ;-- pass 2: copy LSEG payloads
@@ -200,7 +200,23 @@ _bao_gv_ok:
 
 _bao_free_seg:
 	move.l	a2,d0
+	bne.s	_bfsg_concat
+;-- hunk path (a2 already freed): free the relocated SegList chain; each seg
+;   records its full allocation size in the longword before the next-BPTR
+	move.l	d7,d0
+_bfsg_hloop:
+	tst.l	d0
 	beq.s	_bao_free_fshd
+	lsl.l	#2,d0
+	move.l	d0,a1
+	move.l	(a1),d7			;next-BPTR
+	subq.l	#4,a1			;allocation base (size longword)
+	move.l	(a1),d0
+	move.l	BC_ExecBase(a4),a6
+	jsr	FreeMem(a6)
+	move.l	d7,d0
+	bra.s	_bfsg_hloop
+_bfsg_concat:
 	move.l	BC_ExecBase(a4),a6
 	move.l	a2,a1
 	move.l	d4,d0
@@ -457,17 +473,19 @@ _bootGetFSResource:
 	bne.s	_bfr_end
 
 	move.l	BC_ExecBase(a4),a6
+;-- atomic check-and-add, as in _partGetResource
+	jsr	Forbid(a6)
 	lea	FileSysResName(pc),a1
 	jsr	OpenResource(a6)
 	tst.l	d0
-	bne.s	_bfr_cache
+	bne.s	_bfr_permit
 
 ;-- create a new FileSysResource
 	moveq.l	#fsr_Sizeof,d0
 	move.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
 	jsr	AllocMem(a6)
 	tst.l	d0
-	beq.s	_bfr_end
+	beq.s	_bfr_permit
 	move.l	d0,a0
 	move.b	#NT_RESOURCE,LN_Type(a0)
 	lea	FileSysResName(pc),a1
@@ -484,6 +502,10 @@ _bootGetFSResource:
 	move.l	a0,a1
 	jsr	AddResource(a6)
 	move.l	(sp)+,d0
+_bfr_permit:
+	jsr	Permit(a6)		;preserves d0
+	tst.l	d0
+	beq.s	_bfr_end
 _bfr_cache:
 	move.l	d0,BC_FSResource(a4)
 _bfr_end:

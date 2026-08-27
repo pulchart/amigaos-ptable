@@ -125,13 +125,20 @@ _partScanGPT:
 	REVL	d5
 	move.l	84(a1),d6		;SizeOfPartitionEntry (LE)
 	REVL	d6
-	tst.w	d6
-	beq.w	_psg_done
+;-- disk-supplied: accept only >= 128 and a multiple of 128 (UEFI: 128*2^n),
+;   or entries straddle the 512-byte buffer / land on odd addresses
+	move.l	d6,d0
+	and.l	#$7F,d0
+	bne.w	_psg_done
+	cmp.l	#128,d6
+	blo.w	_psg_done
 ;-- iterate entries 0..d5-1
 	moveq.l	#0,d2			;d2 = entry index
 _psg_eloop:
 	cmp.l	d5,d2
 	bhs.w	_psg_done
+	cmp.l	#100,d2			;PR_PartIndex is a byte and the node name
+	bhs.w	_psg_done		;budgets two digits: entries past 99 are skipped
 	cmp.l	#PART_MAX_REC,d7
 	bhs.w	_psg_done
 ;-- byte offset = idx * entrySize; 512-byte sectors -> block = base

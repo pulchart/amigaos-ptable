@@ -65,15 +65,19 @@ dbg_pt_absent:
 _partGetResource:
 	move.l	a6,-(sp)
 	move.l	a5,a6
+;-- the check and the AddResource must be one atomic step, or two tasks
+;   first-calling concurrently each add their own resource (the LVOs are
+;   documented callable from any task context)
+	jsr	Forbid(a6)
 	lea	PartResName(pc),a1
 	jsr	OpenResource(a6)
 	tst.l	d0
-	bne.s	_pgr_end
+	bne.s	_pgr_permit
 	moveq.l	#PTR_Sizeof,d0
 	move.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
 	jsr	AllocMem(a6)
 	tst.l	d0
-	beq.s	_pgr_end
+	beq.s	_pgr_permit
 	move.l	d0,a0
 ;-- Node + struct Library head (so resource viewers show version/id cleanly)
 	move.b	#NT_RESOURCE,LN_Type(a0)
@@ -100,6 +104,8 @@ _partGetResource:
 	move.l	(sp),a1
 	jsr	AddResource(a6)
 	move.l	(sp)+,d0
+_pgr_permit:
+	jsr	Permit(a6)		;preserves d0
 _pgr_end:
 	move.l	(sp)+,a6
 	rts
@@ -501,7 +507,6 @@ RegisterPartition:
 	move.l	d5,-(sp)		;[0(sp)] = nodeDosType input (0 = unknown)
 	move.l	d0,d3			;d3 = unit
 	move.l	d1,d4			;d4 = startLBA
-	move.l	d2,d5			;d5 = blockCount
 	move.l	a0,a3			;a3 = name BSTR
 	move.l	a1,a4			;a4 = device name (C string)
 	move.l	a2,d6			;d6 = devNode

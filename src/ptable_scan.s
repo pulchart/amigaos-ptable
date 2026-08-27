@@ -40,6 +40,9 @@ _srn_rdsk:
 	cmpi.l	#RDSK_ID,(a0)
 	bne.s	_srn_rdsk_next
 	move.l	rdb_SummedLongs(a0),d1
+	moveq.l	#9,d0			;fields read reach long index 8; 0 would
+	cmp.l	d0,d1			;checksum as valid trivially
+	blo.s	_srn_rdsk_next
 	cmp.l	#128,d1
 	bhi.s	_srn_rdsk_next
 	bsr	_bootChecksum
@@ -156,7 +159,7 @@ _srn_fl_have:
 ;- - MBR / GPT: walker -> PartRec[] -> publish - - - - - - -
 _srn_mbr:
 	PTMSG	dbg_pt_mbr
-	lea	-128(sp),sp		;PART_MAX_REC * PR_Sizeof
+	lea	-(PART_MAX_REC*PR_Sizeof)(sp),sp		;PART_MAX_REC * PR_Sizeof
 	move.l	sp,a2			;a2 = PartRec buffer
 	move.l	BC_BlockBuf(a4),a0
 	bsr	_partScanMBR
@@ -164,7 +167,7 @@ _srn_mbr:
 	bra.s	_srn_pubrecs
 _srn_gpt:
 	PTMSG	dbg_pt_gpt
-	lea	-128(sp),sp
+	lea	-(PART_MAX_REC*PR_Sizeof)(sp),sp
 	move.l	sp,a2
 	lea	_psReadLBA(pc),a3
 	bsr	_partScanGPT
@@ -194,7 +197,7 @@ _srn_pr_next:
 	addq.l	#1,d4
 	bra.s	_srn_pr_loop
 _srn_pr_done:
-	lea	128(sp),sp
+	lea	(PART_MAX_REC*PR_Sizeof)(sp),sp
 
 _srn_out:
 ;-- drop slots the current card no longer has (PRESENT still clear after the
@@ -440,7 +443,12 @@ _spf_fail:
 _scanFillFlat:
 	clr.l	pe_PartIndex(a3)
 	move.b	#PES_FLAT,pe_Source(a3)
-	bset	#PEB_PRESENT,pe_Flags(a3)	;preserve other flags (MOUNTED)
+;-- rebuild flags, preserving only PEB_MOUNTED (as _scanFillRec does): stale
+;   BOOTABLE/NOMOUNT bits from a previous card must not survive the refresh
+	move.b	pe_Flags(a3),d2
+	and.b	#1<<PEB_MOUNTED,d2
+	or.b	#1<<PEB_PRESENT,d2
+	move.b	d2,pe_Flags(a3)
 	move.l	#DOSTYPE_FAT,pe_DosType(a3)
 	clr.l	pe_StartLBA(a3)
 	move.l	d3,pe_BlockCount(a3)
@@ -785,6 +793,11 @@ _spg_walk:
 	beq.s	_spg_out
 	cmp.l	pe_Unit(a3),d4
 	bne.s	_spg_next
+	move.l	pe_Device(a3),a0	;same unit NUMBER is not the same unit:
+	move.l	d3,a1			;another device's entries must not have
+	bsr	_psStrEq		;their PRESENT/INVALID state touched
+	tst.l	d0
+	beq.s	_spg_next
 	move.b	pe_Flags(a3),d0
 	btst	#PEB_PRESENT,d0
 	beq.s	_spg_chkmnt
@@ -796,11 +809,6 @@ _spg_chkmnt:
 	bset	#PEB_INVALID,pe_Flags(a3)	;card in, slot not on it -> invalid
 	bra.s	_spg_next		;keep (live node+blob)
 _spg_free:
-	move.l	pe_Device(a3),a0
-	move.l	d3,a1
-	bsr	_psStrEq
-	tst.l	d0
-	beq.s	_spg_next
 	move.l	a5,a6
 	jsr	Forbid(a6)
 	move.l	a3,a1
@@ -839,10 +847,20 @@ _scanFindByIndex:
 _scanFindSlot:
 	moveq.l	#pe_StartLBA,d1
 _scanFindBy:
-	movem.l	d2-d4/a2-a3,-(sp)
+	movem.l	d2-d5/a2-a3,-(sp)
 	move.l	d1,d2			;d2 = identity field offset
 	move.l	d0,d4			;d4 = identity value
 	move.l	BC_Unit(a4),d3
+;-- the identity includes the scheme class: an RDB entry may only be
+;   refreshed by the RDB publisher (StartLBA identity) and a table entry only
+;   by the MBR/GPT/flat publishers (PartIndex identity), or a card swap that
+;   changes the scheme would rewrite a mounted entry of the other kind in
+;   place instead of leaving it to purge (kept as MOUNTED+INVALID)
+	moveq.l	#1,d5			;d5 = 1: caller wants a PES_RDB entry
+	cmp.l	#pe_StartLBA,d2
+	beq.s	_sfb_res
+	moveq.l	#0,d5			;0: caller wants a non-RDB entry
+_sfb_res:
 	bsr	_partGetResource
 	tst.l	d0
 	beq.s	_sfb_no
@@ -856,6 +874,13 @@ _sfb_walk:
 	bne.s	_sfb_next
 	cmp.l	(a3,d2.w),d4
 	bne.s	_sfb_next
+	moveq.l	#0,d0
+	cmp.b	#PES_RDB,pe_Source(a3)
+	bne.s	_sfb_src
+	moveq.l	#1,d0
+_sfb_src:
+	cmp.b	d0,d5			;scheme class must match the caller's
+	bne.s	_sfb_next
 	move.l	pe_Device(a3),a0
 	move.l	BC_DevName(a4),a1
 	bsr	_psStrEq
@@ -866,9 +891,9 @@ _sfb_next:
 	bra.s	_sfb_walk
 _sfb_yes:
 	move.l	a3,d0			;return the matching entry
-	movem.l	(sp)+,d2-d4/a2-a3
+	movem.l	(sp)+,d2-d5/a2-a3
 	rts
 _sfb_no:
 	moveq.l	#0,d0
-	movem.l	(sp)+,d2-d4/a2-a3
+	movem.l	(sp)+,d2-d5/a2-a3
 	rts
