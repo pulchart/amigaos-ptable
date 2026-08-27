@@ -107,6 +107,8 @@ MN_Length	= 18
 
 ;memory types
 MEMF_PUBLIC	= 1
+MEMF_CHIP	= 2
+MEMF_FAST	= 4
 MEMF_CLEAR	= $10000
 MEMF_REVERSE	= $40000
 
@@ -276,6 +278,30 @@ Expunge:
 	moveq.l	#0,d0
 	bra.s	ex_end
 ex_now:
+;-- a resource this library created carries name/creator strings that live in
+;   this seglist, and resources cannot be removed: once one exists, the code
+;   has to stay resident or OpenResource would compare against freed memory
+	lea	PartResName(pc),a1
+	jsr	OpenResource(a6)
+	tst.l	d0
+	beq.s	ex_chkfsr
+	move.l	d0,a0
+	lea	PartResName(pc),a1
+	cmp.l	LN_Name(a0),a1
+	beq.s	ex_refuse
+ex_chkfsr:
+	lea	FileSysResName(pc),a1
+	jsr	OpenResource(a6)
+	tst.l	d0
+	beq.s	ex_go
+	move.l	d0,a0
+	lea	s_libname(pc),a1
+	cmp.l	fsr_Creator(a0),a1
+	bne.s	ex_go
+ex_refuse:
+	moveq.l	#0,d0
+	bra.s	ex_end
+ex_go:
 	move.l	RDBL_SegList(a5),d2	;preserve SegList for return
 	move.l	a5,a1
 	jsr	Remove(a6)		;unlink from library list

@@ -159,7 +159,7 @@ static const char *flags_str(UBYTE f)
    is read from the M flag, shown on every row. */
 static const char *merged_name(const struct PartEntry *pe)
 {
-    static char s[40];
+    static char s[65];    /* 31 name + '>' + 31 mount name + NUL */
     const UBYTE *b = pe->pe_NameB;
     const UBYTE *m = NULL;
     int n = 0, i, len, ml, same;
@@ -193,11 +193,49 @@ static const char *merged_name(const struct PartEntry *pe)
     return s;
 }
 
-/* Default columns plus, when verbose, Start/Blocks/Size */
-static void view_all(struct List *list, int verbose, int nodedt)
+/* A stable copy of one entry: printf cannot run under Forbid (DOS I/O
+ * waits), so rows are printed from a snapshot. pe_Device points into
+ * entry-owned memory, so the string is copied alongside. */
+#define SNAP_MAX 64
+struct Snap {
+    struct PartEntry pe;
+    char             dev[16];  /* the Device column prints at most 13 chars */
+};
+
+/* Copy up to SNAP_MAX entries under Forbid; returns the total list count
+ * (which may exceed the number copied). */
+static int snap_entries(struct List *list, struct Snap *sn)
 {
     struct Node *n;
+    int total = 0, i, c;
+    const char *d;
+
+    Forbid();
+    for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ, total++) {
+        if (total >= SNAP_MAX)
+            continue;
+        sn[total].pe = *(struct PartEntry *)n;
+        sn[total].dev[0] = '\0';
+        d = ((struct PartEntry *)n)->pe_Device;
+        if (d) {
+            c = 0;
+            for (i = 0; d[i] && i < 15; i++)
+                c = i + 1;
+            for (i = 0; i < c; i++)
+                sn[total].dev[i] = d[i];
+            sn[total].dev[c] = '\0';
+        }
+        sn[total].pe.pe_Device = sn[total].dev;
+    }
+    Permit();
+    return total;
+}
+
+/* Default columns plus, when verbose, Start/Blocks/Size */
+static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
+{
     struct PartEntry *pe;
+    int row;
 
     printf("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
            "Name", "Device", "Unit", "Part", "Src", "Pri",
@@ -213,10 +251,10 @@ static void view_all(struct List *list, int verbose, int nodedt)
         printf(" %-5s %10s %11s %6s", "-----", "----------", "-----------", "------");
     printf("\r\n");
 
-    for (n = list->lh_Head; n->ln_Succ; n = n->ln_Succ) {
+    for (row = 0; row < count; row++) {
         ULONG dt;
 
-        pe = (struct PartEntry *)n;
+        pe = &sn[row].pe;
         /* The DosType the mount really uses. pe_DosType is only what was
          * DETECTED on the card; once mounted, what matters is the DosType the
          * node carries, which is the auto-detect marker for a handler finding
@@ -300,9 +338,15 @@ int main(void)
                    res->pr_Layout, res->pr_EntrySize);
     }
 
-    Forbid();
-    view_all(&res->pr_PartList, opt[0] ? 1 : 0, have_nodedt);
-    Permit();
+    {
+        static struct Snap sn[SNAP_MAX];
+        int total = snap_entries(&res->pr_PartList, sn);
+        int shown = total > SNAP_MAX ? SNAP_MAX : total;
+
+        view_all(sn, shown, opt[0] ? 1 : 0, have_nodedt);
+        if (total > shown)
+            printf("(%d more entries not shown)\r\n", total - shown);
+    }
 
     FreeArgs(rda);
     return 0;
