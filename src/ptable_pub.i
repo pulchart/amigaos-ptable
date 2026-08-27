@@ -126,10 +126,13 @@ _LVOUnregisterPartition	= -66
 ;   actually opened the device with; they are recorded in pe_MountFlags /
 ;   pe_Control so lsptres reflects the live mount on every path (including the
 ;   persistent device-dostype handler). Matches by device+unit+startLBA.
-;   An entry MOUNTED by a different node is refused (d0 = 0): overlaying it
-;   would bless a second handler on a served partition and desynchronise the
-;   pe_DevNode/pe_BlobPtr teardown pairing. Re-registering the entry's own
-;   node (rebind) succeeds. Exec-only.
+;   An entry MOUNTED by a different node is never overlaid (that would
+;   desynchronise the pe_DevNode/pe_BlobPtr teardown pairing); the
+;   registration is recorded as an extra-mount row instead: a PEB_SHADOW
+;   clone of the entry carrying the second handler's name and node, so the
+;   resource lists every mount (CF0>CFAUX and CF0>CFA0 as two rows).
+;   Re-registering an entry's own node (rebind) refreshes that entry,
+;   shadow rows included. Exec-only.
 ;
 ; UnregisterPartition(deviceName: a1, unit: d0, startLBA: d1, devNode: a2)
 ;                                                  -> d0 = 1 cleared / 0 no-op
@@ -137,10 +140,11 @@ _LVOUnregisterPartition	= -66
 ;   (its ACTION_DIE was accepted outside a ptable teardown): clears
 ;   PEB_MOUNTED/pe_DevNode/pe_MountName and the recorded mount values, so
 ;   the entry returns to published-only and the partition is the
-;   automount's again. Only the entry's own registrant may clear it
-;   (pe_DevNode must equal devNode). Attempts PTR_Lock like MarkAbsent
-;   and skips when it is busy: a ptable teardown then owns the entry and
-;   frees it itself. Exec-only.
+;   automount's again; a PEB_SHADOW extra-mount row is unlinked and freed
+;   instead. Only the entry's own registrant may clear it (pe_DevNode
+;   must equal devNode). Attempts PTR_Lock like MarkAbsent and skips when
+;   it is busy: a ptable teardown then owns the entry and frees it
+;   itself. Exec-only.
 ;
 ; MarkAbsent(deviceName: a1, unit: d0)            -> d0 = count cleared
 ;   Card removed: clear PEB_PRESENT on every entry for device+unit, keeping
@@ -180,8 +184,9 @@ PTR_Layout	= 94
 PTR_EntrySize	= 96
 PTR_Sizeof	= 98
 
-PTR_LAYOUT_V	= 4			;bump on every appended field (or newly
-					;defined pe_Flags bit); v4 = PEB_KEEPSTATIC
+PTR_LAYOUT_V	= 5			;bump on every appended field (or newly
+					;defined pe_Flags bit); v4 = the policy
+					;bits, v5 = PEB_SHADOW extra-mount rows
 
 ;--- PartEntry (one per discovered partition; layout = PTR_LAYOUT_V) -------
 ;
@@ -277,6 +282,12 @@ PEB_MOUNTUSED	= 6			;layout v4: a hand mountlist may claim this
 					;volume). Stamped by MountPartitions from
 					;mc_UnmFlags MCUF_MOUNTUSED; read by fat95's
 					;auto-detect ownership gate.
+PEB_SHADOW	= 7			;layout v5: an extra-mount row. A handler
+					;that registered over a partition another
+					;node already serves gets its own cloned
+					;entry (the owner row is never overlaid),
+					;so the resource lists every mount. Freed
+					;by UnregisterPartition or the teardown.
 
 ;-- DosType stamped on FAT partitions (fat95 registers $46415400|n)
 DOSTYPE_FAT	= $46415400

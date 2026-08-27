@@ -10,7 +10,7 @@
 
 @{b}ptable.library release notes@{ub}
 
-    @{"20260825-dev" link 20260825_dev}
+    @{"20260827-dev" link 20260827_dev}
     @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
 
 @endnode
@@ -19,17 +19,17 @@
 @{b}Index@{ub}
 
   @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
-  @{"20260825-dev" link 20260825_dev}
+  @{"20260827-dev" link 20260827_dev}
 
 @endnode
 
-@node 20260825_dev "20260825-dev"
-@{b}20260825-dev@{ub}
+@node 20260827_dev "20260827-dev"
+@{b}20260827-dev@{ub}
 
 @{i}Components in this release@{ui}:
 
-  * @{fg shine}ptable.library 2.0-dev (25.08.2026)@{fg text} @{i}(new)@{ui}
-  * @{fg shine}lsptres 1.0-dev (25.08.2026)@{fg text} @{i}(new)@{ui}
+  * @{fg shine}ptable.library 2.0-dev (27.08.2026)@{fg text} @{i}(new)@{ui}
+  * @{fg shine}lsptres 1.0-dev (27.08.2026)@{fg text} @{i}(new)@{ui}
 
 @{b}Partition Table library@{ub}
 
@@ -73,6 +73,6 @@
     under their own name instead of @{fg shine}ptable.library@{fg text} .
 
 ----------------------------------------
-@{"<< Prev" link 20260825_dev}  @{"Contents" link Main}
+@{"<< Prev" link 20260827_dev}  @{"Contents" link Main}
 
 @endnode
