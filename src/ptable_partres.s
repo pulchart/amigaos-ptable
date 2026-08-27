@@ -56,8 +56,6 @@ dbg_pt_unreg:
 	dc.b	"[PT] unregistered ",0
 dbg_pt_mountedas:
 	dc.b	"[PT] mounted as ",0
-dbg_pt_regbusy:
-	dc.b	"[PT] register refused, partition already mounted",CR,LF,0
 dbg_pt_absent:
 	dc.b	"[PT] card removed, media absent",CR,LF,0
 	even
@@ -522,39 +520,104 @@ RegisterPartition:
 	bsr	_partLockRes		;d0 = resource ptr (0 = fail)
 	tst.l	d0
 	beq.w	_rm_unlocked
-	move.l	d0,a0
+	move.l	d0,d5			;d5 = resource (the list is walked twice)
+
+;-- pass 1, rebind: the registrant's own node may already carry a row
+;   (persistent-handler rebind after a card swap; shadow rows included);
+;   refresh that row
+	move.l	d5,a0
 	lea	PTR_PartList(a0),a0
 	move.l	(a0),d7			;d7 = first node
-_rm_walk:
+_rm_w1:
 	move.l	d7,a0			;a0 = entry
 	move.l	(a0),d1			;d1 = succ
-	beq.w	_rm_unlock		;tail -> not found
+	beq.s	_rm_p2			;tail -> no own row yet
 	cmp.l	pe_Unit(a0),d3
-	bne.w	_rm_next
-	cmp.l	pe_StartLBA(a0),d4	;match on start only (FS size may
-	bne.w	_rm_next		; differ from the partition size)
+	bne.s	_rm_n1
+	cmp.l	pe_StartLBA(a0),d4
+	bne.s	_rm_n1
+	cmp.l	pe_DevNode(a0),d6	;this registrant's own row?
+	bne.s	_rm_n1
 	move.l	pe_Device(a0),a0	;a0 = entry's device C string
 	move.l	a4,a1			;a1 = wanted device name
 	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
 	tst.l	d0
-	beq.w	_rm_next
+	bne.w	_rm_take
+_rm_n1:
+	move.l	d1,d7			;cursor = succ
+	bra.s	_rm_w1
 
-;-- ownership: an entry MOUNTED by another node is not overlaid; the
-;   registrant would double-serve a claimed partition, and the entry's
-;   pe_BlobPtr/pe_DevNode pairing would come apart for the teardown.
-;   Re-registering our own node (persistent-handler rebind) passes.
+;-- pass 2, the partition's primary row (shadows skipped): a free row is
+;   claimed; one MOUNTED by another node is never overlaid (that would
+;   desynchronise the pe_DevNode/pe_BlobPtr teardown pairing) - the
+;   registration is recorded as an extra-mount row instead
+_rm_p2:
+	move.l	d5,a0
+	lea	PTR_PartList(a0),a0
+	move.l	(a0),d7
+_rm_w2:
+	move.l	d7,a0			;a0 = entry
+	move.l	(a0),d1			;d1 = succ
+	beq.w	_rm_unlock		;tail -> partition not published
+	cmp.l	pe_Unit(a0),d3
+	bne.s	_rm_n2
+	cmp.l	pe_StartLBA(a0),d4	;match on start only (FS size may
+	bne.s	_rm_n2			; differ from the partition size)
+	btst	#PEB_SHADOW,pe_Flags(a0)
+	bne.s	_rm_n2			;another handler's extra row
+	move.l	pe_Device(a0),a0	;a0 = entry's device C string
+	move.l	a4,a1			;a1 = wanted device name
+	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
+	tst.l	d0
+	beq.s	_rm_n2
 	move.l	d7,a0
 	btst	#PEB_MOUNTED,pe_Flags(a0)
-	beq.s	_rm_take
-	move.l	pe_DevNode(a0),d0
-	beq.s	_rm_take		;no owner recorded -> take it
-	cmp.l	d0,d6
-	beq.s	_rm_take		;our own node -> refresh
-	ifd	DEBUG
-	lea	dbg_pt_regbusy(pc),a0
-	bsr	_bootDebug
-	endc
-	bra.w	_rm_unlock		;refused: d2 stays 0 (not found)
+	beq.w	_rm_take		;free -> claim it
+	tst.l	pe_DevNode(a0)
+	beq.w	_rm_take		;no owner recorded -> take it
+	bra.s	_rm_shadow		;owned by another node -> extra row
+_rm_n2:
+	move.l	d1,d7			;cursor = succ
+	bra.s	_rm_w2
+
+;-- clone the primary as a PEB_SHADOW row and register into the clone:
+;   the owner row stays untouched and the resource lists both mounts
+;   (e.g. CF0>CFAUX and CF0>CFA0)
+_rm_shadow:
+	move.l	#pe_Sizeof,d0
+	move.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
+	move.l	a5,a6
+	jsr	AllocMem(a6)
+	tst.l	d0
+	beq.w	_rm_unlock		;no memory -> unrecorded, d2 stays 0
+	move.l	d0,a2			;a2 = clone
+	move.l	d7,a0			;a0 = primary
+	move.l	a2,a1
+	move.l	#pe_Sizeof/4,d0
+_rm_scp:
+	move.l	(a0)+,(a1)+
+	subq.l	#1,d0
+	bne.s	_rm_scp
+	move.l	d7,a0			;own device-name copy (each entry
+	move.l	pe_Device(a0),a0	;frees its own on retirement)
+	bsr	_psStrDup		;d0 = copy or 0; a5 = ExecBase
+	tst.l	d0
+	bne.s	_rm_shdev
+	move.l	a2,a1			;dup failed: free the clone, unrecorded
+	move.l	#pe_Sizeof,d0
+	move.l	a5,a6
+	jsr	FreeMem(a6)
+	bra.w	_rm_unlock
+_rm_shdev:
+	move.l	d0,pe_Device(a2)
+	lea	pe_NameB(a2),a0
+	move.l	a0,10(a2)		;LN_Name -> the clone's own name
+	clr.l	pe_BlobPtr(a2)		;not a node this library built
+	clr.l	pe_BlobSize(a2)
+	bset	#PEB_SHADOW,pe_Flags(a2)
+	move.l	a2,a0
+	bsr	_scanLinkEntry		;AddTail under Forbid; a5 = ExecBase
+	move.l	a2,d7			;register into the clone
 _rm_take:
 
 ;-- match: copy the real DOS name into pe_MountName (clamp 31), leaving the
@@ -614,10 +677,6 @@ _rm_ccp:
 	bra.s	_rm_unlock
 _rm_noctl:
 	clr.b	(a1)			;empty control
-	bra.s	_rm_unlock
-_rm_next:
-	move.l	d1,d7			;cursor = succ
-	bra.w	_rm_walk
 _rm_unlock:
 	bsr	_partUnlockRes
 _rm_unlocked:
@@ -702,29 +761,51 @@ UnregisterPartition:
 	move.l	RDBL_ExecBase(a6),a5
 	moveq.l	#0,d2			;d2 = result (0 = nothing cleared)
 	tst.l	d6			;no node -> nothing this caller owns
-	beq.s	_ur_unlocked
+	beq.w	_ur_unlocked
 	bsr	_partTryLockRes		;d0 = resource ptr (0 = fail/busy)
 	tst.l	d0
-	beq.s	_ur_unlocked
+	beq.w	_ur_unlocked
 	move.l	d0,a0
 	lea	PTR_PartList(a0),a0
 	move.l	(a0),d7			;d7 = first node
 _ur_walk:
 	move.l	d7,a0			;a0 = entry
 	move.l	(a0),d1			;d1 = succ
-	beq.s	_ur_unlock		;tail -> not found
+	beq.w	_ur_unlock		;tail -> not found
 	cmp.l	pe_Unit(a0),d3
-	bne.s	_ur_next
+	bne.w	_ur_next
 	cmp.l	pe_StartLBA(a0),d4
-	bne.s	_ur_next
+	bne.w	_ur_next
 	cmp.l	pe_DevNode(a0),d6	;only the entry's own registrant
-	bne.s	_ur_next
+	bne.w	_ur_next
 	move.l	pe_Device(a0),a0	;a0 = entry's device C string
 	move.l	a4,a1			;a1 = wanted device name
 	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
 	tst.l	d0
-	beq.s	_ur_next
+	beq.w	_ur_next
+;-- a shadow row was this mount's own bookkeeping: unlink and free it
+	move.l	d7,a0
+	btst	#PEB_SHADOW,pe_Flags(a0)
+	beq.s	_ur_clear
+	moveq.l	#1,d2
+	ifd	DEBUG
+	lea	dbg_pt_unreg(pc),a0
+	bsr	_bootDebug
+	move.l	d7,a0
+	lea	pe_NameB(a0),a0
+	bsr	_bootDebugBStr
+	endc
+	move.l	a5,a6
+	jsr	Forbid(a6)
+	move.l	d7,a1
+	jsr	Remove(a6)
+	jsr	Permit(a6)
+	move.l	d7,a0
+	bsr	_psFreeEntry
+	bra.w	_ur_unlock
+
 ;-- clear the mount overlay; the published scan data stays
+_ur_clear:
 	move.l	d7,a0
 	bclr	#PEB_MOUNTED,pe_Flags(a0)
 	bclr	#PEB_INVALID,pe_Flags(a0)
@@ -744,7 +825,7 @@ _ur_walk:
 	bra.s	_ur_unlock
 _ur_next:
 	move.l	d1,d7			;cursor = succ
-	bra.s	_ur_walk
+	bra.w	_ur_walk
 _ur_unlock:
 	bsr	_partUnlockRes
 _ur_unlocked:

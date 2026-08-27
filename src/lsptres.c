@@ -60,7 +60,7 @@ struct PartResource {
     UWORD                  pr_EntrySize;  /* 96  publisher's pe_Sizeof */
 };                                        /* 98 */
 
-#define PTR_LAYOUT_KNOWN 4  /* highest layout this tool understands */
+#define PTR_LAYOUT_KNOWN 5  /* highest layout this tool understands */
 
 /* PartEntry (ptable_pub.i; layout = PTR_LAYOUT_KNOWN) */
 struct PartEntry {
