@@ -31,7 +31,7 @@ lsptres >SER:      ; forward output over the serial line
 | Pri | Boot priority. |
 | DosType | The DosType the mount uses, as hex. For a mounted partition this is the DosType its node carries, which is `0x464154FF` for a FAT partition on the auto-detect scheme, whatever was configured when a filesystem was chosen explicitly, or what the handler itself registered for a statically mounted one. An unmounted partition has no node, so it shows the DosType detected on the card (`0x46415400` for FAT). Needs a layout 3 publisher, otherwise the detected DosType is always shown. |
 | Text | The DosType as four-character text; non-printable bytes (e.g. a trailing `\0`) show as `.`. |
-| Flags | First char: `P` present, `I` invalid (a card is in but has no partition for this mounted slot), `-` absent. Then `B` bootable, `N` nomount, `M` mounted; `-` for an absent bit. |
+| Flags | First char: `P` present, `I` invalid (a card is in but has no partition for this mounted slot), `-` absent. Then `B` bootable, `N` nomount, `M` mounted; `-` for an absent bit. The fifth char marks a static mount, a partition running on a hand-mounted DOSDriver node (claimed by that handler, or adopted by the automount's name reuse) rather than on a node the automount built: `S` when the entry's keep-policy bit says the mount survives a card removal (`UNMOUNT_STATIC 0` in `cfd.prefs`, stamped into the resource at mount time), `s` when it follows the normal `UNMOUNT` policy, `-` for an automount-built node. A pre-v4 publisher does not stamp the bit; a plain `S` (ownership only) is shown there. |
 | MFlg | Mount Flags the partition was mounted with: cfd's automount resolves these from `cfd.prefs` (`FLAGS`), or a handler that mounts it statically records the value it opened the device with. |
 | Ctrl | CONTROL string the partition was mounted with: from `cfd.prefs` (`CONTROL`) on the automount path, or recorded by a handler mounting statically. |
 
@@ -53,39 +53,39 @@ The card was inserted at runtime; `cfd.prefs` set `CONTROL_FAT -d-D`, so that va
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M-     0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M-     0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M-     0 -d-D
 ```
 
-The `P--M` flags read: present, mounted (not bootable, not nomount). The DosType is `0x464154FF`, not the `0x46415400` detected on the card: these are mounted, and the node a FAT handler auto-detects with carries the device-scheme DosType. Its Text is `FAT.`, the trailing `\xFF` printing as `.` like any non-printable byte.
+The `P--M-` flags read: present, mounted (not bootable, not nomount). The DosType is `0x464154FF`, not the `0x46415400` detected on the card: these are mounted, and the node a FAT handler auto-detects with carries the device-scheme DosType. Its Text is `FAT.`, the trailing `\xFF` printing as `.` like any non-printable byte.
 
 ### A single MBR partition reattached over a 3-partition GPT card (the `I` flag)
 
-Starting from the three-FAT GPT card above (all `P--M`), that card was removed and a single-partition MBR card inserted in its place.
+Starting from the three-FAT GPT card above (all `P--M-`), that card was removed and a single-partition MBR card inserted in its place.
 
 The scan re-matches the new card's one partition to the `CF0` slot, and its Src flips `GPT` to `MBR`, the fresh card's scheme. The `CF1` and `CF2` handlers were never unmounted and the MBR card has no partition for them, so those slots go `I` (invalid): the present bit clears while mounted stays.
 
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-CF0          compactflash.    0    0 MBR   0 0x464154FF FAT. P--M      0 -d-D
-CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. I--M      0 -d-D
-CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. I--M      0 -d-D
+CF0          compactflash.    0    0 MBR   0 0x464154FF FAT. P--M-     0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. I--M-     0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. I--M-     0 -d-D
 ```
 
-`CF0` re-mounted cleanly as `P--M` with the new card's `MBR` scheme. `CF1` / `CF2` read `I--M` - invalid but still mounted: the handlers hold the mounts, and their Src stays `GPT` (the removed card's value) since nothing refreshed them. Contrast a card pulled with no replacement: those slots read `---M` (leading `-`), plain absent rather than invalid.
+`CF0` re-mounted cleanly as `P--M-` with the new card's `MBR` scheme. `CF1` / `CF2` read `I--M-` - invalid but still mounted: the handlers hold the mounts, and their Src stays `GPT` (the removed card's value) since nothing refreshed them. Contrast a card pulled with no replacement: those slots read `---M-` (leading `-`), plain absent rather than invalid.
 
 ### An RDB card with PFS partitions
 
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-SDH10        compactflash.    0    0 RDB   0 0x4D414300 MAC. P-N-      0
-SDH11        compactflash.    0    1 RDB   0 0x4D414300 MAC. P-N-      0
-SDH0         compactflash.    0    2 RDB   0 0x50465303 PFS. PB-M      0
-SDH1         compactflash.    0    3 RDB   0 0x50465303 PFS. P--M      0
-SDH2         compactflash.    0    4 RDB   0 0x50465303 PFS. P--M      0
+SDH10        compactflash.    0    0 RDB   0 0x4D414300 MAC. P-N--     0
+SDH11        compactflash.    0    1 RDB   0 0x4D414300 MAC. P-N--     0
+SDH0         compactflash.    0    2 RDB   0 0x50465303 PFS. PB-M-     0
+SDH1         compactflash.    0    3 RDB   0 0x50465303 PFS. P--M-     0
+SDH2         compactflash.    0    4 RDB   0 0x50465303 PFS. P--M-     0
 ```
 
 `SDH0` is bootable (`B`). `SDH10` and `SDH11` are marked nomount (`N`) in their RDB entries, so they are published but not mounted (no `M`). RDB partitions carry no `cfd.prefs` Flags / CONTROL, so MFlg is `0` and Ctrl is empty.
@@ -96,7 +96,7 @@ SDH2         compactflash.    0    4 RDB   0 0x50465303 PFS. P--M      0
 layout v3, entry size 260
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl       CMD        Start      Blocks   Size
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ---------- ----------- ------
-CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD       2048     4194304  2048M
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M-     0 -d-D       NSCMD       2048     4194304  2048M
 ```
 
 ## See also

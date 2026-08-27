@@ -37,11 +37,14 @@
 ;   high 3 bytes, e.g. $50465300 'PFS'): tear down only entries whose
 ;   pe_DosType matches; every other matched entry is marked absent
 ;   (PEB_PRESENT cleared, handler kept).
-;   Static mounts are exempt either way: an entry whose DOS node this
-;   library did not build (pe_BlobPtr = 0, i.e. a hand-mounted DOSDriver
-;   claimed via RegisterPartition or adopted by the mount-time name reuse)
-;   is never torn down, only marked absent; removing that node is the
-;   user's call, not a card event's.
+;   Static-mount exemption: an entry whose DOS node this library did not
+;   build (pe_BlobPtr = 0, i.e. a hand-mounted DOSDriver claimed via
+;   RegisterPartition or adopted by the mount-time name reuse) AND whose
+;   PEB_KEEPSTATIC bit is set is exempt from both modes: not torn down,
+;   only marked absent; removing the user's node is then the user's call.
+;   The bit is stamped by MountPartitions from mc_UnmFlags, so the policy
+;   lives in the resource and lsptres shows it (S vs s in its flag
+;   picture); a policy change takes effect on the next mount pass.
 
 ;--- MountCfg (-> MountPartitions in a0; 0 = cold-boot defaults) -----------
 ;
@@ -75,7 +78,17 @@ mc_Size		= 20			;ULONG the caller's mc_Sizeof. MountCfg's
 					;by appending a field and bumping mc_Sizeof.
 					;The 2.0 fields above are baseline and are
 					;always read.
-mc_Sizeof	= 24
+mc_UnmFlags	= 24			;ULONG unmount-policy bits (MCUF_*), read only
+					;when mc_Size >= 28. MountPartitions stamps
+					;MCUF_KEEPSTATIC into PEB_KEEPSTATIC on every
+					;entry it walks for the device+unit, so the
+					;policy becomes resource state UnmountPartitions
+					;and lsptres both read.
+mc_Sizeof	= 28
+
+MCUF_KEEPSTATIC	= 0			;keep static mounts on card removal
+MCUF_STAMPONLY	= 1			;walk + stamp the policy, mount nothing
+					;(caller has its own mounting disabled)
 ;
 ; Override row (array terminated by ovr_Prefix = 0):
 ovr_Prefix	= 0			;ULONG dostype high 3 bytes ('DOS\0' etc); 0 = end
@@ -149,7 +162,8 @@ PTR_Layout	= 94
 PTR_EntrySize	= 96
 PTR_Sizeof	= 98
 
-PTR_LAYOUT_V	= 3			;bump on every appended field
+PTR_LAYOUT_V	= 4			;bump on every appended field (or newly
+					;defined pe_Flags bit); v4 = PEB_KEEPSTATIC
 
 ;--- PartEntry (one per discovered partition; layout = PTR_LAYOUT_V) -------
 ;
@@ -234,6 +248,11 @@ PEB_MOUNTED	= 3			;a DeviceNode is registered
 PEB_INVALID	= 4			;mounted slot, but the inserted card has no such
 					;partition. Derived each scan (MOUNTED & !PRESENT
 					;while media is in), not stored policy.
+PEB_KEEPSTATIC	= 5			;layout v4: keep this entry's static mount on
+					;card removal. Stamped by MountPartitions from
+					;mc_UnmFlags MCUF_KEEPSTATIC on every entry it
+					;walks; meaningful only with pe_BlobPtr = 0
+					;(a node this library did not build).
 
 ;-- DosType stamped on FAT partitions (fat95 registers $46415400|n)
 DOSTYPE_FAT	= $46415400

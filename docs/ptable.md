@@ -12,7 +12,7 @@ Two jobs, at two different times.
 
 MBR, GPT and flat partitions are published but not registered at cold boot: DOS does not exist yet, so their mount configuration cannot be read. The DOS-time automount mounts them a moment later.
 
-Registering a partition needs a handler for its filesystem already in `FileSystem.resource`. FAT partitions match any registered `FAT\x` handler, every other filesystem must match its DosType exactly. With no handler the partition stays published but unmounted, listed by `lsptres` as `P---`.
+Registering a partition needs a handler for its filesystem already in `FileSystem.resource`. FAT partitions match any registered `FAT\x` handler, every other filesystem must match its DosType exactly. With no handler the partition stays published but unmounted, listed by `lsptres` as `P----`.
 
 **DOS-time scan and automount.** When a card is inserted after the machine is up, the consumer's mount worker (brought up by `compactflash.automount`) calls `ScanPartitions` to publish the card's partitions, then `MountPartitions` to mount them. On removal it calls `UnmountPartitions` or `MarkAbsent`, depending on the configured policy.
 
@@ -135,12 +135,12 @@ A fixed window does not follow a card swap the way the auto-detect scheme does, 
 
 **Detach policy (card removal).** Two ways to handle a removed card's partitions:
 
-- **Keep, `MarkAbsent`:** clear `PRESENT` but keep the DOS node and handler in memory. The entry stays listed as absent-but-mounted (`---M`), and reinserting the same card reattaches it without re-initialising the handler. This is the native AmigaOS removable-media model. `compactflash.device` takes this path when the `UNMOUNT` key lists no recognised filesystem, `UNMOUNT NONE` being the usual spelling.
+- **Keep, `MarkAbsent`:** clear `PRESENT` but keep the DOS node and handler in memory. The entry stays listed as absent-but-mounted (`---M-`), and reinserting the same card reattaches it without re-initialising the handler. This is the native AmigaOS removable-media model. `compactflash.device` takes this path when the `UNMOUNT` key lists no recognised filesystem, `UNMOUNT NONE` being the usual spelling.
 - **Tear down, `UnmountPartitions` with a prefix list:** stop the handler, remove its DOS node (ACTION_DIE + RemDosEntry + free the node) and drop the entry from the resource. Only filesystems in the list are torn down; any other matched entry is kept and marked absent, exactly as `MarkAbsent` would leave it. With no prefix list every mounted entry for the device and unit is torn down. `compactflash.device` passes all supported filesystems by default, and an explicit `UNMOUNT` key restricts it, for example `UNMOUNT FAT`.
 
-Static mounts are exempt from tear-down either way: an entry whose DOS node the library did not build itself, that is a hand-mounted `DEVS:DOSDrivers` entry that claimed its partition via `RegisterPartition` or was adopted by the mount-time name reuse, is only ever marked absent. Removing that node is the user's call, not a card event's. A full build prints `static mount kept` on serial when this rule fires.
+Static mounts can be exempted from tear-down. A static mount is an entry whose DOS node the library did not build itself: a hand-mounted `DEVS:DOSDrivers` entry that claimed its partition via `RegisterPartition`, or one the mount-time name reuse adopted. The exemption is per-entry resource state: `MountPartitions` stamps the caller's `mc_UnmFlags` keep policy into the entry's `PEB_KEEPSTATIC` bit on every pass, `UnmountPartitions` obeys the bit, and `lsptres` shows it in the fifth Flags position (`S` = static mount kept on removal, `s` = static mount following the normal policy), so the display and the behaviour can never disagree. A kept mount is only marked absent, never torn down; removing its node is the user's call, not a card event's, and a full build prints `static mount kept` on serial when the rule fires. With the bit clear (the default; the cold-boot path passes no config and never stamps) a static mount follows the normal policy. `compactflash.device` exposes the policy as `UNMOUNT_STATIC 0` in `cfd.prefs`; being stamped at mount time, a change takes effect on the next insert.
 
-**When an unmount does not happen.** `UnmountPartitions` keeps the mount and only marks the partition absent if the handler declined `ACTION_DIE` with an error code, if it is still alive three seconds after the packet, or if the DOS device list stays busy for a second. Nothing is freed in that case: the DOS node and the handler are left as they were, and the next card removal tries again. Expect `UnmountPartitions` to return fewer entries than were mounted, and the resource to still hold `---M` rows afterwards.
+**When an unmount does not happen.** `UnmountPartitions` keeps the mount and only marks the partition absent if the handler declined `ACTION_DIE` with an error code, if it is still alive three seconds after the packet, or if the DOS device list stays busy for a second. Nothing is freed in that case: the DOS node and the handler are left as they were, and the next card removal tries again. Expect `UnmountPartitions` to return fewer entries than were mounted, and the resource to still hold `---M-` rows afterwards.
 
 A volume that is still in use is the ordinary reason an unmount does not happen. A filesystem cannot give up a volume that something holds a lock on, because the volume node has to stay in the DOS list for that lock to remain valid. Release whatever holds it, for example by closing its Workbench window, and the next removal unmounts it.
 
@@ -201,12 +201,12 @@ The resulting `partition.resource`, listed by `lsptres` (columns explained in [`
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M-     0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M-     0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M-     0 -d-D
 ```
 
-All three are mounted (`P--M`), with the `Ctrl` value `-d-D` resolved from `CONTROL_FAT` in `cfd.prefs`.
+All three are mounted (`P--M-`), with the `Ctrl` value `-d-D` resolved from `CONTROL_FAT` in `cfd.prefs`.
 
 **Card removed, keep policy.** With `UNMOUNT NONE` the handlers stay in memory and the entries are only marked absent, so reinserting the same card reattaches them:
 
@@ -219,9 +219,9 @@ All three are mounted (`P--M`), with the `Ctrl` value `-d-D` resolved from `CONT
 The count is `MarkAbsent`'s return: entries whose present flag was cleared, not mounts torn down (none are).
 
 ```
-CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
-CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. ---M      0 -d-D
-CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. ---M-     0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. ---M-     0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. ---M-     0 -d-D
 ```
 
 **Card removed, teardown policy.** With the default list, or `UNMOUNT FAT` here, the FAT partitions are unmounted and dropped from the resource:
@@ -235,7 +235,7 @@ CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
 [MW] entries detached: 3
 ```
 
-A handler that will not go says why: `[PT] ACTION_DIE declined, code <n>` when it refused outright, or `[PT] ACTION_DIE unanswered, handler alive` when it never replied, followed by `[PT] partition kept, marked absent`. That partition stays `---M`.
+A handler that will not go says why: `[PT] ACTION_DIE declined, code <n>` when it refused outright, or `[PT] ACTION_DIE unanswered, handler alive` when it never replied, followed by `[PT] partition kept, marked absent`. That partition stays `---M-`.
 
 ## Public interface for developers
 
