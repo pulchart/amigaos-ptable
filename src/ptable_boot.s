@@ -934,7 +934,7 @@ _bootDedupName:
 	movem.l	d0-d6/a0-a3/a6,-(sp)
 	move.l	BC_ExpBase(a4),a3	;a3 = ExpansionBase
 	move.l	a3,d0
-	beq.s	_bdn_ret		;no exp.lib -> nothing to check
+	beq.w	_bdn_ret		;no exp.lib -> nothing to check
 ;-- other tasks mutate eb_MountList under Forbid; walk it the same way
 	move.l	(_AbsExecBase).w,a6
 	jsr	Forbid(a6)
@@ -950,7 +950,7 @@ _bdn_retry:
 	move.l	(a0),a1			;a1 = first node (lh_Head)
 _bdn_walk:
 	move.l	(a1),d0			;ln_Succ
-	beq.s	_bdn_unique		;tail sentinel -> name is unique
+	beq.s	_bdn_dos		;eb tail -> check the DOS device list too
 	move.l	16(a1),a2		;bn_DeviceNode
 	move.l	a2,d0
 	beq.s	_bdn_next		;NULL device node
@@ -970,7 +970,44 @@ _bdn_dup:
 	bhs.s	_bdn_unique
 	addq.l	#1,d4
 	bsr	_bootApplySuffix
-	bra.s	_bdn_retry
+	bra.w	_bdn_retry
+
+;-- runtime names live on the DOS device list (post-DOS AddBootNode hands
+;   the node straight to dos.library and leaves nothing on eb_MountList),
+;   so a cold-only walk misses every mount made since boot. Same Forbid;
+;   dos.library's base via FindName, no open count for a transient look.
+_bdn_dos:
+	lea	378(a6),a0		;ExecBase LibList
+	lea	DosName(pc),a1
+	jsr	FindName(a6)
+	tst.l	d0
+	beq.s	_bdn_unique		;no DOS yet -> cold phase, eb list was it
+	move.l	d0,a1
+	move.l	34(a1),d0		;dl_Root (APTR RootNode)
+	beq.s	_bdn_unique
+	move.l	d0,a1
+	move.l	24(a1),d0		;rn_Info (BPTR DosInfo)
+	beq.s	_bdn_unique
+	lsl.l	#2,d0
+	move.l	d0,a1
+	move.l	4(a1),d0		;di_DevInfo (BPTR first DosList node)
+_bdn_dwalk:
+	tst.l	d0
+	beq.s	_bdn_unique		;list end -> name is unique
+	lsl.l	#2,d0
+	move.l	d0,a1			;a1 = DosList node
+	tst.l	4(a1)			;dol_Type: DLT_DEVICE = 0
+	bne.s	_bdn_dnext
+	move.l	40(a1),d0		;dol_Name (BPTR)
+	beq.s	_bdn_dnext
+	lsl.l	#2,d0
+	move.l	d0,a2			;a2 = existing name BSTR
+	lea	DN_BSTR_OFF(a5),a0	;a0 = candidate BSTR
+	bsr	_bootBStrEqualCI	;preserves a1
+	beq.w	_bdn_dup
+_bdn_dnext:
+	move.l	(a1),d0			;dol_Next (BPTR)
+	bra.s	_bdn_dwalk
 
 _bdn_unique:
 	move.l	(_AbsExecBase).w,a6
@@ -993,7 +1030,7 @@ _bootFindNode:
 	move.l	a0,a3			;a3 = wanted name BSTR
 	move.l	BC_ExpBase(a4),a1
 	move.l	a1,d0
-	beq.s	_bfn_no			;no exp.lib
+	beq.w	_bfn_no			;no exp.lib
 ;-- other tasks mutate eb_MountList under Forbid; walk it the same way
 	move.l	(_AbsExecBase).w,a6
 	jsr	Forbid(a6)
@@ -1002,7 +1039,7 @@ _bootFindNode:
 	move.l	(a0),a1			;a1 = first BootNode (lh_Head)
 _bfn_walk:
 	move.l	(a1),d0			;ln_Succ
-	beq.s	_bfn_no2		;tail -> not found (drop Forbid)
+	beq.s	_bfn_dos		;eb tail -> search the DOS device list
 	move.l	16(a1),d1		;d1 = bn_DeviceNode
 	beq.s	_bfn_next
 	move.l	d1,a2
@@ -1028,13 +1065,71 @@ _bfn_walk:
 	beq.s	_bfn_next
 	lsl.l	#2,d0
 	move.l	d0,a0			;a0 = node device BSTR (arg A)
-	move.l	BC_DevNameBSTR(a4),a2	;a2 = our device BSTR (arg B)
+	move.l	BC_DevNameBSTR(a4),d0	;our device BSTR (a BPTR: shift it,
+	lsl.l	#2,d0			;or the compare reads a quarter address
+	move.l	d0,a2			;a2 = our device BSTR (arg B)
 	bsr	_bootBStrEqualCI	;Z = equal; preserves a0/a2/d1-d3
 	bne.s	_bfn_next		;foreign device -> skip
-	bra.s	_bfn_hit		;owned match -> reuse
+	bra.w	_bfn_hit		;owned match -> reuse
 _bfn_next:
 	move.l	(a1),a1			;a1 = ln_Succ
 	bra.s	_bfn_walk
+
+;-- eb_MountList only carries nodes queued before DOS started: once DOS is
+;   up, AddBootNode hands a node straight to dos.library and leaves nothing
+;   behind, so the live namespace is the DOS device list. Walked under the
+;   same Forbid; dos.library's base comes from FindName (a transient look
+;   needs no open count).
+_bfn_dos:
+	lea	378(a6),a0		;ExecBase LibList
+	lea	DosName(pc),a1
+	jsr	FindName(a6)
+	tst.l	d0
+	beq.s	_bfn_no2		;no DOS yet -> the eb list was everything
+	move.l	d0,a1
+	move.l	34(a1),d0		;dl_Root (APTR RootNode)
+	beq.s	_bfn_no2
+	move.l	d0,a1
+	move.l	24(a1),d0		;rn_Info (BPTR DosInfo)
+	beq.s	_bfn_no2
+	lsl.l	#2,d0
+	move.l	d0,a1
+	move.l	4(a1),d0		;di_DevInfo (BPTR first DosList node)
+_bfn_dwalk:
+	tst.l	d0
+	beq.s	_bfn_no2		;list end -> not found
+	lsl.l	#2,d0
+	move.l	d0,a1			;a1 = DosList node
+	tst.l	4(a1)			;dol_Type: DLT_DEVICE = 0
+	bne.s	_bfn_dnext
+	move.l	40(a1),d0		;dol_Name (BPTR)
+	beq.s	_bfn_dnext
+	lsl.l	#2,d0
+	move.l	d0,a0			;a0 = existing name BSTR (arg A)
+	move.l	a3,a2			;a2 = wanted name BSTR (arg B)
+	bsr	_bootBStrEqualCI	;Z = equal; preserves a1
+	bne.s	_bfn_dnext
+;-- same ownership gate as the eb walk: our device+unit only
+	move.l	a1,d1			;d1 = candidate DeviceNode
+	move.l	28(a1),d0		;dn_Startup (BPTR FSSM)
+	beq.s	_bfn_dnext
+	lsl.l	#2,d0
+	move.l	d0,a2
+	move.l	BC_Unit(a4),d0
+	cmp.l	(a2),d0			;fssm_Unit
+	bne.s	_bfn_dnext
+	move.l	4(a2),d0		;fssm_Device (BPTR BSTR)
+	beq.s	_bfn_dnext
+	lsl.l	#2,d0
+	move.l	d0,a0
+	move.l	BC_DevNameBSTR(a4),d0
+	lsl.l	#2,d0
+	move.l	d0,a2
+	bsr	_bootBStrEqualCI	;preserves a1/d1
+	beq.s	_bfn_hit		;owned match -> reuse
+_bfn_dnext:
+	move.l	(a1),d0			;dol_Next (BPTR)
+	bra.s	_bfn_dwalk
 _bfn_hit:
 	move.l	d1,d0			;d0 = DeviceNode
 	jsr	Permit(a6)
