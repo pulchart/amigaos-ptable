@@ -122,7 +122,10 @@ _LVOMarkAbsent		= -60
 ;   actually opened the device with; they are recorded in pe_MountFlags /
 ;   pe_Control so lsptres reflects the live mount on every path (including the
 ;   persistent device-dostype handler). Matches by device+unit+startLBA.
-;   Exec-only.
+;   An entry MOUNTED by a different node is refused (d0 = 0): overlaying it
+;   would bless a second handler on a served partition and desynchronise the
+;   pe_DevNode/pe_BlobPtr teardown pairing. Re-registering the entry's own
+;   node (rebind) succeeds. Exec-only.
 ;
 ; MarkAbsent(deviceName: a1, unit: d0)            -> d0 = count cleared
 ;   Card removed: clear PEB_PRESENT on every entry for device+unit, keeping
