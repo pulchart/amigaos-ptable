@@ -234,17 +234,21 @@ PTDEC	macro
 ;      16     4   BC_BlockBuf     -> trailing 512B buffer
 ;      20     4   BC_FSResource   FileSystem.resource (lazy)
 ;      24     1   BC_DevOpen      1 if OpenDevice succeeded
-;      25     1   BC_SigOK        1 if reply-port signal alloc'd
+;      25     1   BC_SigOK        allocated signal number, -1 = none
 ;      26     1   BC_HaveNodes    1 if any AddBootNode/AddDosNode ran
 ;      27     1   BC_PartCount    count of partitions registered
 ;      28    34   BC_DevMsgPort
 ;      62    56   BC_DevIOReq
-;     118     2   (pad to long)
+;     118     1   BC_ReadMode     cached read method (PERM_*, 0 = unprobed)
+;     119     1   (pad to long)
 ;     120     4   BC_ConfigDev    synthetic ConfigDev (0 = none)
 ;     124     4   BC_DevName      caller's device name string
 ;     128     4   BC_DevNameBSTR  cached BSTR(BPTR) of BC_DevName
 ;                                 for fssm_Device (0 = alloc failed,
-;                                 _actBuildBlob then skips)
+;                                 _actBuildBlob then fails the build)
+;     132     4   BC_UnmountPrefixes  0-terminated dostype-prefix list
+;                                 (UnmountPartitions); 0 = all
+;     136     4   BC_MountCfg     APTR MountCfg; 0 = cold-boot defaults
 ;     140     4   BC_NodeHandler  resolved handler path for this entry
 ;                                 (0 = FileSystem.resource only)
 ;     144   512   block buffer (BC_BlockBuf points here)
@@ -639,8 +643,9 @@ _bcu_end:
 
 ;===========================================================
 ; _bootDelay100ms: sleep ~100 ms. Uses dos.library/Delay(5)
-; if DosBase is open, otherwise a rough busy-wait (~350k
-; simple insns is ~100ms on a 7 MHz 68000).
+; if DosBase is open, otherwise a rough busy-wait (pre-DOS only;
+; on a 7 MHz 68000 the loop runs ~2.7M cycles, closer to 400 ms,
+; so cold-boot waits err on the long side).
 ;===========================================================
 _bootDelay100ms:
 	move.l	a6,-(sp)
@@ -686,8 +691,8 @@ _bootReadBlock:
 ; scsi.device) take NSCMD_TD_READ64, floppy drivers (mfm.device) only
 ; CMD_READ, and old controllers sit in between. On the first read we
 ; probe NSCMD_TD_READ64 -> TD_READ64 -> HD_SCSICMD -> CMD_READ, keep the
-; first the device accepts (anything but IOERR_NOCMD), and cache it in
-; BC_ReadMode for the rest of the scan.
+; first method that completes a read (any error moves on; CMD_READ is the
+; forced last resort), and cache it in BC_ReadMode for the rest of the scan.
 ;
 ; Input : d0.l = high32, d1.l = low32, d2.l = bytes,
 ;         a1   = destination, a4 = &BootCtx
@@ -856,8 +861,8 @@ _bcs_end:
 ; device-agnostic so the caller-supplied name has to be
 ; converted to a BSTR at runtime.
 ;
-; Called once per BootScanPartitions invocation; the result is cached
-; in BC_DevNameBSTR and shared across every partition's FSSM.
+; Called once per BootScanPartitions/MountPartitions invocation; the result
+; is cached in BC_DevNameBSTR and shared across every partition's FSSM.
 ;
 ; Input : a0 = NUL-terminated C string, a4 = &BootCtx,
 ;         a6 = ExecBase
@@ -1050,9 +1055,8 @@ _bfn_done:
 ; first or its stale bn_DeviceNode->dn_Name faults the next list walk
 ; (_bootFindNode/_bootDedupName and expansion's own AddDosNode).
 ; The BootNode struct itself is NOT freed (expansion-allocated, size not
-; reliably known); the leak is one-time and bounded - only the single
-; cold-boot BootNode ever exists, since re-mounts use AddDosNode which adds
-; nothing to eb_MountList.
+; reliably known): each AddBootNode/AddDosNode links one (V36+ AddDosNode is
+; AddBootNode with no ConfigDev), so about 20 bytes leak per teardown.
 ; In : a4 = &BootCtx (BC_ExpBase), d0 = DeviceNode to unlink, a5 = ExecBase
 ; Out: d0 = 1 the list was checked (node removed or not present),
 ;      d0 = 0 BC_ExpBase missing -> caller must NOT free the DN blob

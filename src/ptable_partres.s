@@ -497,7 +497,7 @@ _up_ret:
 ; input here means a new LVO, not another register.
 ;
 ; Overlay a real mount onto an already-published entry (matched by
-; device+unit+start+count): set its name to the handler's real DOS name,
+; device+unit+startLBA; the FS size may differ from the partition size): set its name to the handler's real DOS name,
 ; mark it MOUNTED, and record the DeviceNode. Find-only; Exec context.
 ;===========================================================
 RegisterPartition:

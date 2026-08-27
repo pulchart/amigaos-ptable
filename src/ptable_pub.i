@@ -12,8 +12,9 @@
 ;   Cold stage; call from an RTF_COLDSTART context (pre-DOS, single task).
 ;   Scans the device, publishes every partition into partition.resource,
 ;   loads RDB-carried filesystems into FileSystem.resource, then registers
-;   each mountable entry: RDB+bootable via AddBootNode, everything else via
-;   AddDosNode(flags=0). System-Startup starts the handlers (steps 3-8).
+;   each mountable RDB entry: bootable via AddBootNode, the rest via
+;   AddDosNode(flags=0); MBR/GPT/flat entries stay published for a DOS-time
+;   consumer. System-Startup starts the handlers (steps 3-8).
 ;   Adds the synthetic ConfigDev (boot menu) when anything was registered.
 ;
 ; ScanPartitions(deviceName: a1, unit: d0)   -> d0 = partitions newly published
@@ -29,7 +30,7 @@
 ;   filesystem for a synthesized-envec partition; the DosType the node ends up
 ;   with is recorded in pe_NodeDosType.
 ;
-; UnmountPartitions(deviceName: a1, unit: d0, prefixList: a0) -> d0 = removed
+; UnmountPartitions(deviceName: a1, unit: d0, prefixList: a0) -> d0 = torn down
 ;   Runtime teardown; CALL FROM A PROCESS. prefixList = 0: ACTION_DIE +
 ;   RemDosEntry + free every mounted entry for the device+unit (published-only
 ;   records are dropped). prefixList != 0 (0-terminated longwords of dostype
@@ -46,8 +47,9 @@
 ;
 ; mc_NodeDosType / mc_NodeHandler let the caller decide which filesystem serves
 ; a partition this library synthesized an envec for, i.e. one that came from an
-; MBR or GPT table rather than from an RDB. They apply to FAT-family entries
-; only; an RDB entry keeps the DosType and the geometry recorded on the card.
+; MBR, GPT or flat (whole-disk FAT) card rather than from an RDB. They apply to
+; FAT-family entries only; an RDB entry keeps the DosType and the geometry
+; recorded on the card.
 ;
 mc_Flags	= 0			;ULONG global fssm_Flags
 mc_Control	= 4			;APTR  global CONTROL C-string (0 = none)
@@ -123,7 +125,8 @@ _LVOMarkAbsent		= -60
 ;  96      ptr_EntrySize UWORD pe_Sizeof the publisher was built with
 ;  98      ptr_Sizeof
 ;
-; Writers (the four LVOs) hold ptr_Lock for their whole run. Read-only
+; Writers (every LVO; MarkAbsent only attempts the lock and skips when it is
+; busy) hold ptr_Lock for their whole run. Read-only
 ; consumers walk ptr_PartList under Forbid() or take ptr_Lock themselves.
 ;
 ; ABI GROWTH CONTRACT (applies to this header AND PartEntry):
@@ -175,6 +178,7 @@ pe_Control	= 212			;32 bytes embedded BSTR: resolved CONTROL string
 pe_Length	= 244			;UWORD allocated entry size, stamped = pe_Sizeof
 					;at publish; consumers bounds-check appended
 					;fields against it (see growth contract above)
+;		  246..247		;(2 pad: keep pe_NodeDosType 4-aligned)
 pe_NodeDosType	= 248			;ULONG DosType actually stamped into the node's
 					;DosEnvec (layout 3). NOT pe_DosType: that stays
 					;the DETECTED filesystem, so the Flags/CONTROL/
@@ -246,7 +250,9 @@ DEVICE_DOSTYPE_MARKER = $464154FF
 ;   (pfs3aio ROM module)                                prio 78, registers its
 ;                                                       FileSysEntry
 ;   (fat95 ROM module)                                  prio 0, registers
-;                                                       FAT\0..\8 FileSysEntries
+;                                                       FAT\0..\8 plus the
+;                                                       $464154FF device-scheme
+;                                                       FileSysEntries
 ;   PRI_CFD_BOOT      compactflash.autoboot RTF_COLDSTART opens ptable.library,
 ;                                                       calls BootScanPartitions
 ;

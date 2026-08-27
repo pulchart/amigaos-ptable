@@ -112,7 +112,7 @@ BootPri, stored in the partition environment, does not decide bootability; it or
 
 **2. The consumer's mount configuration (`MountCfg`, DOS-time path).** `MountPartitions` takes an optional `MountCfg` supplying a global mount `Flags` value, a global `CONTROL` string, a per-filesystem override table, and the pair `mc_NodeDosType` / `mc_NodeHandler`. The library resolves each partition's `Flags` and `CONTROL` by its DosType (matching the high three bytes, e.g. `FAT\0`), falling back to the global value. Passing `0` selects cold-boot defaults.
 
-`mc_NodeDosType` and `mc_NodeHandler` decide **which filesystem serves a partition** whose envec this library synthesized, i.e. one from an MBR or GPT table rather than an RDB. They are described under [Choosing the filesystem](#choosing-the-filesystem) below.
+`mc_NodeDosType` and `mc_NodeHandler` decide **which filesystem serves a partition** whose envec this library synthesized, i.e. one from an MBR, GPT or flat (whole-disk FAT) card rather than an RDB. They are described under [Choosing the filesystem](#choosing-the-filesystem) below.
 
 For `compactflash.device` these values come from `ENV:cfd.prefs`: the `FLAGS` and `CONTROL` keys, global and `_<fs>` per filesystem. So to change how hotplugged cards mount, you edit `cfd.prefs`, not `ptable.library`. The resolved values are recorded per partition and shown live by `lsptres` in its `MFlg` and `Ctrl` columns.
 
@@ -120,7 +120,7 @@ The full user-facing reference for the `cfd.prefs` keys, plus deployment default
 
 ### Choosing the filesystem
 
-`mc_NodeDosType` and `mc_NodeHandler` decide which filesystem serves a partition that came from an MBR or GPT table. They apply to FAT-family entries only, and never to RDB: an RDB envec is the card's own, its `de_LowCyl`/`de_HighCyl` are real cylinders against real `de_Surfaces`/`de_BlocksPerTrack`, and writing block counts into those fields would be nonsense.
+`mc_NodeDosType` and `mc_NodeHandler` decide which filesystem serves a partition that came from an MBR or GPT table or a flat (whole-disk FAT) card. They apply to FAT-family entries only, and never to RDB: an RDB envec is the card's own, its `de_LowCyl`/`de_HighCyl` are real cylinders against real `de_Surfaces`/`de_BlocksPerTrack`, and writing block counts into those fields would be nonsense.
 
 - **Neither set:** the envec stays exactly as the scan built it and the handler comes from `FileSystem.resource`. This is the default and is unchanged.
 - **`mc_NodeDosType` set:** the node carries that DosType and gets the partition's own block range in `de_LowCyl`/`de_HighCyl`. The handler still comes from `FileSystem.resource`.
@@ -129,7 +129,7 @@ The full user-facing reference for the `cfd.prefs` keys, plus deployment default
 
 Naming a DosType also fixes the window, and that is not two settings collapsed into one: a handler told which filesystem to be is not a handler auto-detecting its own partition, so it needs to be given the partition. The arithmetic is exact because a synthesized envec uses `Surfaces = 1`, `BlocksPerTrk = 1`, one block per cylinder. Leaving `mc_NodeDosType` at `0` leaves the envec untouched, so the default path is unchanged.
 
-`mc_NodeHandler` is consulted only when nothing in `FileSystem.resource` matches the node's DosType. The node is then built with that path in `dn_Handler` and `dn_SegList = 0`, so DOS loads the handler on first reference, exactly as a `DEVS:DOSDrivers` mount does. Resource first, path second, means that when a handler later becomes resident the path can simply be dropped from the configuration. A path that does not resolve leaves the node with no process; nothing is torn down and DOS retries on the next reference. The library copies the string, which it does not own past the call.
+`mc_NodeHandler` is consulted only when nothing in `FileSystem.resource` matches the node's DosType. The node is then built with that path in `dn_Handler` and `dn_SegList = 0`, so DOS loads the handler on first reference, exactly as a `DEVS:DOSDrivers` mount does. Resource first, path second, means that when a handler later becomes resident the path can simply be dropped from the configuration. A path that does not resolve leaves the node with no process; nothing is torn down and DOS retries on the next reference. The library copies the string, which it does not own past the call; a handler path is clamped to 23 characters and a CONTROL string to 31.
 
 A fixed window does not follow a card swap the way the auto-detect scheme does, so it belongs with a teardown detach policy rather than with `MarkAbsent`. The failure mode is benign either way: a handler re-reads the boot block at the start of its window on every media change, so a different card either genuinely has a volume at that offset or reports not-a-DOS-disk.
 
@@ -197,7 +197,7 @@ A FAT card at cold boot is published and left for DOS time, which is what the ot
 The resulting `partition.resource`, listed by `lsptres` (columns explained in [`lsptres.md`](lsptres.md)):
 
 ```
-Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
 CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
 CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
@@ -211,8 +211,10 @@ All three are mounted (`P--M`), with the `Ctrl` value `-d-D` resolved from `CONT
 ```
 [MW] card removed
 [PT] card removed, media absent
-[MW] entries detached: 0
+[MW] entries detached: 3
 ```
+
+The count is `MarkAbsent`'s return: entries whose present flag was cleared, not mounts torn down (none are).
 
 ```
 CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
@@ -243,7 +245,8 @@ ScanPartitions(deviceName:a1, unit:d0)                     -36
 MountPartitions(deviceName:a1, unit:d0, cfg:a0)            -42
 UnmountPartitions(deviceName:a1, unit:d0, prefixList:a0)   -48
 RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
-                  nameBSTR:a0, devNode:a2, flags:d3, control:d4)  -54
+                  nameBSTR:a0, devNode:a2, flags:d3, control:d4,
+                  nodeDosType:d5)                                 -54
 MarkAbsent(deviceName:a1, unit:d0)                         -60
 ```
 
