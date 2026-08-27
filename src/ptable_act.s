@@ -503,6 +503,11 @@ _amo_walk:
 	beq.s	_amo_nokeep
 	bset	#PEB_KEEPSTATIC,pe_Flags(a3)
 _amo_nokeep:
+	bclr	#PEB_MOUNTUSED,pe_Flags(a3)
+	btst	#MCUF_MOUNTUSED,d0
+	beq.s	_amo_noused
+	bset	#PEB_MOUNTUSED,pe_Flags(a3)
+_amo_noused:
 	btst	#MCUF_STAMPONLY,d0
 	bne.w	_amo_next
 _amo_stamped:
