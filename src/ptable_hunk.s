@@ -20,7 +20,7 @@
 ;   HUNK_UNIT    ($3E7): skip n longwords.
 ;   HUNK_END     ($3F2): advance to next hunk.
 ;
-; Any other id logs "[RDB] hunk: bad id $xxxxxxxx" (DEBUG builds)
+; Any other id logs "[PT] hunk: bad id $xxxxxxxx" (DEBUG builds)
 ; then triggers full teardown (free per-hunk allocs, free scratch
 ; table, return 0). Caller leaves FileSystem.resource untouched in
 ; that case.

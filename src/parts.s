@@ -74,7 +74,7 @@ _psm_done:
 	rts
 
 ;-- _psm_isfat: d0 = type byte in; d0 = 1 if FAT type else 0.
-;   Whitelist 01/04/06 (FAT12/16) and 0b/0c/0e (FAT32/LBA).
+;   Whitelist 01/04/06 (FAT12/16), 0b/0c (FAT32), 0e (FAT16 LBA).
 _psm_isfat:
 	cmpi.b	#$01,d0
 	beq.s	_psm_yes
@@ -99,9 +99,9 @@ _psm_yes:
 ;
 ; Input : a2 = &PartRec output buffer, a3 = block-reader callback
 ;              (d0 = block LBA -> d0 = 0 on success & a0 = &512B
-;               buffer; preserves d2-d7), a4 = callback context
+;               buffer; preserves d2-d7/a2-a4), a4 = callback context
 ; Output: d0 = record count
-; Preserves d2-d7/a4-a6 (a0/a1/a5 scratch).
+; Preserves d2-d7/a2-a6 (a0/a1 scratch).
 ;===========================================================
 _partScanGPT:
 	movem.l	d2-d7/a5,-(sp)

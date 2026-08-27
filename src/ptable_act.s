@@ -13,14 +13,16 @@
 ;               matched entry (all, or by dostype-prefix policy).
 ;
 ; Callers hold PTR_Lock; a4 = &BootCtx (BC_DevName/BC_Unit always,
-; BC_DevNameBSTR + BC_ExpBase for cold/mount, BC_DosBase for unmount),
+; BC_DevNameBSTR + BC_ExpBase for cold/mount, BC_DosBase + BC_ExpBase
+; for unmount),
 ; a5 = ExecBase.
 ;===========================================================
 
 ;===========================================================
 ; _actBuildBlob: build the DeviceNode blob for one entry.
 ; In : a3 = PartEntry, a4 = &BootCtx, a5 = ExecBase
-; Out: d0 = blob byte address (0 = alloc failure)
+; Out: d0 = blob byte address (0 = alloc failure, no device-name BSTR,
+;       or no handler could be bound)
 ; The blob layout (shared by the cold and runtime mount paths):
 ;   [  0..43 ] DeviceNode   [ 44..59 ] FileSysStartupMsg
 ;   [ 60..143] DosEnvec     [144..175] dn_Name BSTR
@@ -575,7 +577,8 @@ _amo_out:
 ;   - if BC_UnmountPrefixes is non-zero and the entry's dostype is NOT in the
 ;     list -> keep the handler, only mark the entry absent (---M).
 ;   - published-only entry (no handler) -> free the resource entry.
-; In : a4 = &BootCtx (BC_DosBase may be 0, BC_UnmountPrefixes set), a5 = ExecBase;
+; In : a4 = &BootCtx (BC_DosBase may be 0, BC_ExpBase + BC_UnmountPrefixes
+;      set), a5 = ExecBase;
 ;      PTR_Lock held; PROCESS context (packet I/O, DOS list lock)
 ; Out: d0 = entries torn down
 ;===========================================================
@@ -750,8 +753,8 @@ _ate_nofree:
 ; and its reply port live in an AllocMem block; the port is PA_IGNORE
 ; (a reply just enqueues, signals nobody), and the only death signal is
 ; the bounded dol_Task poll (100 ms steps, PAD_POLL_MAX tries). Both
-; handlers reply before clearing dol_Task (fat95 replies immediately
-; and exits from its idle loop; PFS3 replies after clearing it), so on
+; handlers eventually answer; fat95 replies before clearing dol_Task,
+; PFS3 clears it first (which is why _pad_noreply can leak the block), so on
 ; death the reply is already here and the block can be freed. If the
 ; handler is still alive at timeout it still owns the packet: the block
 ; is deliberately leaked (bounded, 102 bytes) - the PA_IGNORE port

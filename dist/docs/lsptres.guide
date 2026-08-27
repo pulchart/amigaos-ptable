@@ -170,7 +170,7 @@ The card was inserted at runtime; @{fg shine}cfd.prefs@{fg text} set @{fg shine}
 that value appears in the Ctrl column and applies to every FAT mount.
 
 @{fg highlight}
-  Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+  Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
   CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
   CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
@@ -201,7 +201,7 @@ them, so those slots go @{fg shine}I@{fg text} (invalid): the present bit clears
 mounted stays.
 
 @{fg highlight}
-  Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+  Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
   CFa0         compactflash.    0    0 MBR   0 0x464154FF FAT. P--M      0 -d-D
   CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. I--M      0 -d-D
@@ -223,7 +223,7 @@ read @{fg shine}---M@{fg text} (leading @{fg shine}-@{fg text} ), plain absent r
 @{i}An RDB card with PFS partitions@{ui}
 
 @{fg highlight}
-  Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+  Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
   SDH10        compactflash.    0    0 RDB   0 0x4D414300 MAC. P-N-      0
   SDH11        compactflash.    0    1 RDB   0 0x4D414300 MAC. P-N-      0
@@ -246,9 +246,10 @@ empty.
 @{i}Verbose@{ui}
 
 @{fg highlight}
-  Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl       CMD   Start   Blocks   Size
-  ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ------- -------- ------
-  CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD    2048  4194304  2048M
+  layout v3, entry size 260
+  Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl       CMD        Start      Blocks   Size
+  ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ---------- ----------- ------
+  CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD       2048     4194304  2048M
 @{fg text}
 
 ----------------------------------------

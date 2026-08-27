@@ -51,7 +51,7 @@ Verbose (`VERBOSE` / `V`) appends:
 The card was inserted at runtime; `cfd.prefs` set `CONTROL_FAT -d-D`, so that value appears in the Ctrl column and applies to every FAT mount.
 
 ```
-Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
 CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
 CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
@@ -67,7 +67,7 @@ Starting from the three-FAT GPT card above (all `P--M`), that card was removed a
 The scan re-matches the new card's one partition to the `CFa0` slot, and its Src flips `GPT` to `MBR`, the fresh card's scheme. The `CFa1` and `CFa2` handlers were never unmounted and the MBR card has no partition for them, so those slots go `I` (invalid): the present bit clears while mounted stays.
 
 ```
-Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
 CFa0         compactflash.    0    0 MBR   0 0x464154FF FAT. P--M      0 -d-D
 CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. I--M      0 -d-D
@@ -79,7 +79,7 @@ CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. I--M      0 -d-D
 ### An RDB card with PFS partitions
 
 ```
-Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
 SDH10        compactflash.    0    0 RDB   0 0x4D414300 MAC. P-N-      0
 SDH11        compactflash.    0    1 RDB   0 0x4D414300 MAC. P-N-      0
@@ -93,9 +93,10 @@ SDH2         compactflash.    0    4 RDB   0 0x50465303 PFS. P--M      0
 ### Verbose
 
 ```
-Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl       CMD   Start   Blocks   Size
------------- ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ------- -------- ------
-CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD    2048  4194304  2048M
+layout v3, entry size 260
+Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl       CMD        Start      Blocks   Size
+------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ---------- ----------- ------
+CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD       2048     4194304  2048M
 ```
 
 ## See also

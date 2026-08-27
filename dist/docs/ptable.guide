@@ -377,8 +377,9 @@ bytes, e.g. @{fg shine}FAT\0@{fg text} ), falling back to the global value. Pass
 cold-boot defaults.
 
 @{fg shine}mc_NodeDosType@{fg text} and @{fg shine}mc_NodeHandler@{fg text} decide @{b}which filesystem serves a
-partition@{ub} whose envec this library synthesized, i.e. one from an MBR or
-GPT table rather than an RDB. They are described under @{"Choosing the filesystem" link choosing_the_filesystem} below.
+partition@{ub} whose envec this library synthesized, i.e. one from an MBR,
+GPT or flat (whole-disk FAT) card rather than an RDB. They are described
+under @{"Choosing the filesystem" link choosing_the_filesystem} below.
 
 For @{fg shine}compactflash.device@{fg text} these values come from @{fg shine}ENV:cfd.prefs@{fg text} : the @{fg shine}FLAGS@{fg text}
 and @{fg shine}CONTROL@{fg text} keys, global and @{fg shine}_<fs>@{fg text} per filesystem. So to change how
@@ -399,11 +400,11 @@ automount guide ( @{fg shine}automount.guide@{fg text} ).
 @{i}Choosing the filesystem@{ui}
 
 @{fg shine}mc_NodeDosType@{fg text} and @{fg shine}mc_NodeHandler@{fg text} decide which filesystem serves a
-partition that came from an MBR or GPT table. They apply to FAT-family
-entries only, and never to RDB: an RDB envec is the card's own, its
-@{fg shine}de_LowCyl@{fg text} / @{fg shine}de_HighCyl@{fg text} are real cylinders against real @{fg shine}de_Surfaces@{fg text} /
-@{fg shine}de_BlocksPerTrack@{fg text} , and writing block counts into those fields would be
-nonsense.
+partition that came from an MBR or GPT table or a flat (whole-disk FAT)
+card. They apply to FAT-family entries only, and never to RDB: an RDB
+envec is the card's own, its @{fg shine}de_LowCyl@{fg text} / @{fg shine}de_HighCyl@{fg text} are real cylinders
+against real @{fg shine}de_Surfaces@{fg text} / @{fg shine}de_BlocksPerTrack@{fg text} , and writing block counts
+into those fields would be nonsense.
 
   * @{b}Neither set:@{ub} the envec stays exactly as the scan built it and the handler
     comes from @{fg shine}FileSystem.resource@{fg text} . This is the default and is unchanged.
@@ -431,7 +432,8 @@ second, means that when a handler later becomes resident the path can
 simply be dropped from the configuration. A path that does not resolve
 leaves the node with no process; nothing is torn down and DOS retries on
 the next reference. The library copies the string, which it does not own
-past the call.
+past the call; a handler path is clamped to 23 characters and a CONTROL
+string to 31.
 
 A fixed window does not follow a card swap the way the auto-detect
 scheme does, so it belongs with a teardown detach policy rather than
@@ -548,7 +550,7 @@ The resulting @{fg shine}partition.resource@{fg text} , listed by @{fg shine}lsp
 in @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ):
 
 @{fg highlight}
-  Name         Device        Unit Part Src Pri DosType    Text Flags MFlg Ctrl
+  Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
   CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
   CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
@@ -565,8 +567,11 @@ reattaches them:
 @{fg highlight}
   [MW] card removed
   [PT] card removed, media absent
-  [MW] entries detached: 0
+  [MW] entries detached: 3
 @{fg text}
+
+The count is @{fg shine}MarkAbsent@{fg text} 's return: entries whose present flag was
+cleared, not mounts torn down (none are).
 
 @{fg highlight}
   CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
@@ -609,7 +614,8 @@ included.
   MountPartitions(deviceName:a1, unit:d0, cfg:a0)            -42
   UnmountPartitions(deviceName:a1, unit:d0, prefixList:a0)   -48
   RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
-                    nameBSTR:a0, devNode:a2, flags:d3, control:d4)  -54
+                    nameBSTR:a0, devNode:a2, flags:d3, control:d4,
+                    nodeDosType:d5)                                 -54
   MarkAbsent(deviceName:a1, unit:d0)                         -60
 @{fg text}
 

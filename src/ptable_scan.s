@@ -69,7 +69,7 @@ _srn_rdsk_next:
 	bra.w	_srn_mbr
 
 _srn_none:
-	PTMSG	dbg_boot_no_rdb		;"[PT] nothing recognised"
+	PTMSG	dbg_boot_no_rdb		;"[PT] no partition table"
 	bra.w	_srn_out
 
 ;- - RDB: FSHD handler load, then publish each PART block - -
@@ -85,8 +85,8 @@ _srn_rdb:
 	move.l	rdb_PartitionList(a0),d5	;d5 = partition list head
 	move.l	rdb_FileSysHeaderList(a0),d4	;d4 = fshd list head
 
-;-- Phase 1: filesystems carried in the RDB (hop-capped walk; see the
-;   cycle-breaker rationale at the FSHD walk in BootScanPartitions)
+;-- Phase 1: filesystems carried in the RDB (hop cap + self-loop guard
+;   break on-disk next-pointer cycles)
 	move.l	d4,d3
 	moveq.l	#16,d2
 _srn_fs_loop:
@@ -304,9 +304,9 @@ _frd_nm:
 	lea	pe_Envec(a3),a1
 	move.l	d2,d3
 	addq.l	#1,d3
-	cmp.l	#21,d3			;pe_Envec holds 21 longs; clamp a
-	bls.s	_frd_ecp		;bogus on-disk DE_TABLESIZE so the
-	moveq.l	#21,d3			;copy cannot overrun into pe_ReadMode
+	cmp.l	#21,d3			;pe_Envec holds 21 longs. Defensive
+	bls.s	_frd_ecp		;only: the publisher already skips
+	moveq.l	#21,d3			;partitions with TableSize > 20
 _frd_ecp:
 	move.l	(a0)+,(a1)+
 	subq.l	#1,d3
