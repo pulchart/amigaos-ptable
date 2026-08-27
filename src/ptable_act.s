@@ -572,6 +572,9 @@ _amo_out:
 ;===========================================================
 ; _actUnmount: retire runtime-mounted entries for this device+unit. After the
 ; call an entry survives only if a live handler still serves it:
+;   - MOUNTED entry on a node this library did not build (pe_BlobPtr = 0:
+;     a static mount, or one adopted by the name reuse) -> keep the handler,
+;     only mark the entry absent (---M); the node is the user's to remove.
 ;   - matched MOUNTED entry -> tear down (ACTION_DIE + RemDosEntry + free node)
 ;     AND free the resource entry.
 ;   - if BC_UnmountPrefixes is non-zero and the entry's dostype is NOT in the
@@ -601,6 +604,13 @@ _aum_walk:
 	move.b	pe_Flags(a3),d3
 	btst	#PEB_MOUNTED,d3
 	beq.w	_aum_drop		;published-only (no handler) -> free entry
+;-- a static mount first: pe_BlobPtr is set only on nodes this library
+;   built itself. A mounted entry without it runs on the user's own node
+;   (hand DOSDriver claimed via RegisterPartition, or adopted by the name
+;   reuse) and is the user's to remove: never torn down, whatever the
+;   UNMOUNT policy says; kept absent like the keep-handler path.
+	tst.l	pe_BlobPtr(a3)
+	beq.s	_aum_static
 ;-- a MOUNTED entry: prefix list decides tear-down vs keep-handler
 	move.l	BC_UnmountPrefixes(a4),d0
 	beq.s	_aum_teardown		;no list -> tear down + free every mounted
@@ -627,6 +637,13 @@ _aum_teardown:
 _aum_td_ok:
 	addq.l	#1,d7
 	bra.w	_aum_next
+_aum_static:
+	ifd	DEBUG
+	lea	dbg_pt_static(pc),a0
+	bsr	_bootDebug
+	lea	pe_NameB(a3),a0
+	bsr	_bootDebugBStr
+	endc
 _aum_keep:
 	bclr	#PEB_PRESENT,pe_Flags(a3)	;handler kept, marked absent (---M)
 	bra.w	_aum_next
