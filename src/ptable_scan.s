@@ -294,8 +294,8 @@ _frd_nb:
 	beq.s	_frd_nm
 	bset	#PEB_NOMOUNT,d1
 _frd_nm:
-	move.b	pe_Flags(a3),d0		;preserve PEB_MOUNTED
-	and.b	#1<<PEB_MOUNTED,d0
+	move.b	pe_Flags(a3),d0		;preserve PEB_MOUNTED + PEB_KEEPSTATIC
+	and.b	#(1<<PEB_MOUNTED)|(1<<PEB_KEEPSTATIC),d0
 	or.b	d1,d0
 	move.b	d0,pe_Flags(a3)
 	move.l	pb_Environment+DE_BOOTPRI*4(a2),pe_BootPri(a3)
@@ -383,8 +383,8 @@ _scanFillRec:
 	beq.s	_sfr_nb
 	bset	#PEB_BOOTABLE,d1	;informational for FAT (never booted)
 _sfr_nb:
-	move.b	pe_Flags(a3),d2		;preserve PEB_MOUNTED across the refresh
-	and.b	#1<<PEB_MOUNTED,d2
+	move.b	pe_Flags(a3),d2		;preserve PEB_MOUNTED + PEB_KEEPSTATIC
+	and.b	#(1<<PEB_MOUNTED)|(1<<PEB_KEEPSTATIC),d2
 	or.b	d1,d2
 	move.b	d2,pe_Flags(a3)
 	move.l	PR_DosType(a2),pe_DosType(a3)
@@ -443,10 +443,11 @@ _spf_fail:
 _scanFillFlat:
 	clr.l	pe_PartIndex(a3)
 	move.b	#PES_FLAT,pe_Source(a3)
-;-- rebuild flags, preserving only PEB_MOUNTED (as _scanFillRec does): stale
-;   BOOTABLE/NOMOUNT bits from a previous card must not survive the refresh
+;-- rebuild flags, preserving only PEB_MOUNTED + PEB_KEEPSTATIC (as
+;   _scanFillRec does): stale BOOTABLE/NOMOUNT bits from a previous card
+;   must not survive the refresh
 	move.b	pe_Flags(a3),d2
-	and.b	#1<<PEB_MOUNTED,d2
+	and.b	#(1<<PEB_MOUNTED)|(1<<PEB_KEEPSTATIC),d2
 	or.b	#1<<PEB_PRESENT,d2
 	move.b	d2,pe_Flags(a3)
 	move.l	#DOSTYPE_FAT,pe_DosType(a3)

@@ -85,7 +85,8 @@ read. The DOS-time automount mounts them a moment later.
 Registering a partition needs a handler for its filesystem already in
 @{fg shine}FileSystem.resource@{fg text} . FAT partitions match any registered @{fg shine}FAT\x@{fg text} handler,
 every other filesystem must match its DosType exactly. With no handler
-the partition stays published but unmounted, listed by @{fg shine}lsptres@{fg text} as @{fg shine}P---@{fg text} .
+the partition stays published but unmounted, listed by @{fg shine}lsptres@{fg text} as @{fg shine}P----@{fg text}
+.
 
 @{b}DOS-time scan and automount.@{ub} When a card is inserted after the machine
 is up, the consumer's mount worker (brought up by @{fg shine}compactflash.automount@{fg text}
@@ -448,7 +449,7 @@ or reports not-a-DOS-disk.
 partitions:
 
   * @{b}Keep, @{fg shine}MarkAbsent@{fg text} :@{ub} clear @{fg shine}PRESENT@{fg text} but keep the DOS node and handler in memory.
-    The entry stays listed as absent-but-mounted ( @{fg shine}---M@{fg text} ), and reinserting the
+    The entry stays listed as absent-but-mounted ( @{fg shine}---M-@{fg text} ), and reinserting the
     same card reattaches it without re-initialising the handler. This is the
     native AmigaOS removable-media model. @{fg shine}compactflash.device@{fg text} takes this path when
     the @{fg shine}UNMOUNT@{fg text} key lists no recognised filesystem, @{fg shine}UNMOUNT NONE@{fg text} being the usual
@@ -461,12 +462,22 @@ partitions:
     @{fg shine}compactflash.device@{fg text} passes all supported filesystems by default, and an
     explicit @{fg shine}UNMOUNT@{fg text} key restricts it, for example @{fg shine}UNMOUNT FAT@{fg text} .
 
-Static mounts are exempt from tear-down either way: an entry whose DOS
-node the library did not build itself, that is a hand-mounted
-@{fg shine}DEVS:DOSDrivers@{fg text} entry that claimed its partition via @{fg shine}RegisterPartition@{fg text}
-or was adopted by the mount-time name reuse, is only ever marked absent.
-Removing that node is the user's call, not a card event's. A full build
-prints @{fg shine}static mount kept@{fg text} on serial when this rule fires.
+Static mounts can be exempted from tear-down. A static mount is an entry
+whose DOS node the library did not build itself: a hand-mounted
+@{fg shine}DEVS:DOSDrivers@{fg text} entry that claimed its partition via @{fg shine}RegisterPartition@{fg text} ,
+or one the mount-time name reuse adopted. The exemption is per-entry
+resource state: @{fg shine}MountPartitions@{fg text} stamps the caller's @{fg shine}mc_UnmFlags@{fg text} keep
+policy into the entry's @{fg shine}PEB_KEEPSTATIC@{fg text} bit on every pass,
+@{fg shine}UnmountPartitions@{fg text} obeys the bit, and @{fg shine}lsptres@{fg text} shows it in the fifth Flags
+position ( @{fg shine}S@{fg text} = static mount kept on removal, @{fg shine}s@{fg text} = static mount following
+the normal policy), so the display and the behaviour can never disagree.
+A kept mount is only marked absent, never torn down; removing its node
+is the user's call, not a card event's, and a full build prints
+@{fg shine}static mount kept@{fg text} on serial when the rule fires. With the bit clear (the
+default; the cold-boot path passes no config and never stamps) a static
+mount follows the normal policy. @{fg shine}compactflash.device@{fg text} exposes the policy
+as @{fg shine}UNMOUNT_STATIC 0@{fg text} in @{fg shine}cfd.prefs@{fg text} ; being stamped at mount time, a change
+takes effect on the next insert.
 
 @{b}When an unmount does not happen.@{ub} @{fg shine}UnmountPartitions@{fg text} keeps the mount and
 only marks the partition absent if the handler declined @{fg shine}ACTION_DIE@{fg text} with
@@ -474,7 +485,7 @@ an error code, if it is still alive three seconds after the packet, or
 if the DOS device list stays busy for a second. Nothing is freed in that
 case: the DOS node and the handler are left as they were, and the next
 card removal tries again. Expect @{fg shine}UnmountPartitions@{fg text} to return fewer
-entries than were mounted, and the resource to still hold @{fg shine}---M@{fg text} rows
+entries than were mounted, and the resource to still hold @{fg shine}---M-@{fg text} rows
 afterwards.
 
 A volume that is still in use is the ordinary reason an unmount does not
@@ -561,12 +572,12 @@ in @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ):
 @{fg highlight}
   Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
-  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
-  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
+  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M-     0 -d-D
+  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M-     0 -d-D
+  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M-     0 -d-D
 @{fg text}
 
-All three are mounted ( @{fg shine}P--M@{fg text} ), with the @{fg shine}Ctrl@{fg text} value @{fg shine}-d-D@{fg text} resolved from
+All three are mounted ( @{fg shine}P--M-@{fg text} ), with the @{fg shine}Ctrl@{fg text} value @{fg shine}-d-D@{fg text} resolved from
 @{fg shine}CONTROL_FAT@{fg text} in @{fg shine}cfd.prefs@{fg text} .
 
 @{b}Card removed, keep policy.@{ub} With @{fg shine}UNMOUNT NONE@{fg text} the handlers stay in memory
@@ -583,9 +594,9 @@ The count is @{fg shine}MarkAbsent@{fg text} 's return: entries whose present fl
 cleared, not mounts torn down (none are).
 
 @{fg highlight}
-  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
-  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. ---M      0 -d-D
-  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
+  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. ---M-     0 -d-D
+  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. ---M-     0 -d-D
+  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. ---M-     0 -d-D
 @{fg text}
 
 @{b}Card removed, teardown policy.@{ub} With the default list, or @{fg shine}UNMOUNT FAT@{fg text}
@@ -603,7 +614,7 @@ here, the FAT partitions are unmounted and dropped from the resource:
 A handler that will not go says why: @{fg shine}[PT] ACTION_DIE declined, code <n>@{fg text}
 when it refused outright, or @{fg shine}[PT] ACTION_DIE unanswered, handler alive@{fg text}
 when it never replied, followed by @{fg shine}[PT] partition kept, marked absent@{fg text} .
-That partition stays @{fg shine}---M@{fg text} .
+That partition stays @{fg shine}---M-@{fg text} .
 
 ----------------------------------------
 @{"<< Prev" link Choosing_the_filesystem}  @{"Contents" link Main}  @{"Next >>" link Public_interface_for_developers}

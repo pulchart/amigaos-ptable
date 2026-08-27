@@ -486,6 +486,26 @@ _amo_walk:
 	bsr	_actMatch
 	tst.l	d0
 	beq.w	_amo_next
+;-- stamp the unmount policy (layout v4): the caller's MCUF_KEEPSTATIC ->
+;   PEB_KEEPSTATIC on EVERY matched entry, static and mounted ones
+;   included, so UnmountPartitions and lsptres read the policy from the
+;   resource. No cfg (cold boot) or one too old to carry mc_UnmFlags
+;   (mc_Size < 28) leaves the bit untouched. MCUF_STAMPONLY stamps and
+;   skips the mount step (the caller's own mounting is disabled).
+	move.l	BC_MountCfg(a4),d0
+	beq.s	_amo_stamped
+	move.l	d0,a0
+	cmp.l	#mc_UnmFlags+4,mc_Size(a0)
+	blo.s	_amo_stamped
+	move.l	mc_UnmFlags(a0),d0
+	bclr	#PEB_KEEPSTATIC,pe_Flags(a3)
+	btst	#MCUF_KEEPSTATIC,d0
+	beq.s	_amo_nokeep
+	bset	#PEB_KEEPSTATIC,pe_Flags(a3)
+_amo_nokeep:
+	btst	#MCUF_STAMPONLY,d0
+	bne.w	_amo_next
+_amo_stamped:
 	move.b	pe_Flags(a3),d3
 	btst	#PEB_NOMOUNT,d3
 	bne.w	_amo_next
@@ -573,8 +593,11 @@ _amo_out:
 ; _actUnmount: retire runtime-mounted entries for this device+unit. After the
 ; call an entry survives only if a live handler still serves it:
 ;   - MOUNTED entry on a node this library did not build (pe_BlobPtr = 0:
-;     a static mount, or one adopted by the name reuse) -> keep the handler,
-;     only mark the entry absent (---M); the node is the user's to remove.
+;     a static mount, or one adopted by the name reuse) -> when the entry
+;     carries PEB_KEEPSTATIC (stamped by MountPartitions from the caller's
+;     mc_UnmFlags), keep the handler and only mark the entry absent (---M);
+;     the node is the user's to remove. With the bit clear such an entry
+;     follows the normal policy below.
 ;   - matched MOUNTED entry -> tear down (ACTION_DIE + RemDosEntry + free node)
 ;     AND free the resource entry.
 ;   - if BC_UnmountPrefixes is non-zero and the entry's dostype is NOT in the
@@ -607,10 +630,15 @@ _aum_walk:
 ;-- a static mount first: pe_BlobPtr is set only on nodes this library
 ;   built itself. A mounted entry without it runs on the user's own node
 ;   (hand DOSDriver claimed via RegisterPartition, or adopted by the name
-;   reuse) and is the user's to remove: never torn down, whatever the
-;   UNMOUNT policy says; kept absent like the keep-handler path.
+;   reuse). With PEB_KEEPSTATIC stamped on the entry (by MountPartitions,
+;   from the caller's mc_UnmFlags) it is the user's to remove: not torn
+;   down, kept absent like the keep-handler path. With the bit clear it
+;   follows the normal policy below.
 	tst.l	pe_BlobPtr(a3)
-	beq.s	_aum_static
+	bne.s	_aum_policy
+	btst	#PEB_KEEPSTATIC,d3
+	bne.s	_aum_static
+_aum_policy:
 ;-- a MOUNTED entry: prefix list decides tear-down vs keep-handler
 	move.l	BC_UnmountPrefixes(a4),d0
 	beq.s	_aum_teardown		;no list -> tear down + free every mounted

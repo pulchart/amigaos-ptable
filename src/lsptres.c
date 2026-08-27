@@ -46,6 +46,7 @@ const char version[] = MAKE_VERSION_STRING("lsptres");
 #define PEF_NOMOUNT  (1<<2)
 #define PEF_MOUNTED  (1<<3)
 #define PEF_INVALID  (1<<4)
+#define PEF_KEEPSTATIC (1<<5)  /* layout 4: static mount kept on removal */
 
 /* partition.resource layout: MUST mirror ptable_pub.i, append-only,
  * new fields are only ever added at the end (never inserted), guarded by
@@ -59,7 +60,7 @@ struct PartResource {
     UWORD                  pr_EntrySize;  /* 96  publisher's pe_Sizeof */
 };                                        /* 98 */
 
-#define PTR_LAYOUT_KNOWN 3  /* highest layout this tool understands */
+#define PTR_LAYOUT_KNOWN 4  /* highest layout this tool understands */
 
 /* PartEntry (ptable_pub.i; layout = PTR_LAYOUT_KNOWN) */
 struct PartEntry {
@@ -141,16 +142,28 @@ static const char *ctrl_str(const struct PartEntry *pe)
     return s;
 }
 
-/* 4-char flag picture. First char is three-valued: P present, I invalid
-   (a card is in but it has no partition for this mounted slot), - absent. */
-static const char *flags_str(UBYTE f)
+/* publisher layout is 4 or newer: PEF_KEEPSTATIC is meaningful */
+static int g_layout4;
+
+/* 5-char flag picture. First char is three-valued: P present, I invalid
+   (a card is in but it has no partition for this mounted slot), - absent.
+   The fifth char marks a mount running on a node the library did not
+   build (pe_BlobPtr = 0): a hand-mounted DOSDriver that claimed the
+   partition, or one adopted by the mount-time name reuse. S = the
+   PEF_KEEPSTATIC policy bit says the mount survives a card removal,
+   s = it follows the normal UNMOUNT policy. A pre-v4 publisher does not
+   stamp the bit, so a plain S (ownership only) is shown there. */
+static const char *flags_str(const struct PartEntry *pe)
 {
-    static char s[5];
+    static char s[6];
+    UBYTE f = pe->pe_Flags;
     s[0] = (f & PEF_PRESENT) ? 'P' : (f & PEF_INVALID) ? 'I' : '-';
     s[1] = (f & PEF_BOOTABLE) ? 'B' : '-';
     s[2] = (f & PEF_NOMOUNT)  ? 'N' : '-';
     s[3] = (f & PEF_MOUNTED)  ? 'M' : '-';
-    s[4] = '\0';
+    s[4] = ((f & PEF_MOUNTED) && !pe->pe_BlobPtr)
+           ? (!g_layout4 ? 'S' : (f & PEF_KEEPSTATIC) ? 'S' : 's') : '-';
+    s[5] = '\0';
     return s;
 }
 
@@ -273,7 +286,7 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                (unsigned long)dt);
         print_dostype(dt);
         printf(" %-5s %5lu %-10s",
-               flags_str(pe->pe_Flags),
+               flags_str(pe),
                (unsigned long)pe->pe_MountFlags,
                ctrl_str(pe));
         if (verbose)
@@ -295,6 +308,8 @@ static void usage(void)
            "Name:  partition name, plus \">dosname\" when mounted under another name\r\n"
            "Src:   MBR GPT RDB FLT   (partition scheme)\r\n"
            "Flags: P present  I invalid (card in, slot not on it)  B bootable  N nomount  M mounted\r\n"
+           "       5th char: static mount (hand DOSDriver node): S kept on card removal,\r\n"
+           "       s follows the UNMOUNT policy; - not static\r\n"
            "MFlg:  mount Flags the partition was mounted with\r\n"
            "Ctrl:  CONTROL string resolved for this mount\r\n"
            "DosType: the DosType the mount uses - for a mounted partition the\r\n"
@@ -329,6 +344,8 @@ int main(void)
         UWORD possize = *(UWORD *)((UBYTE *)res + 18);
         if (possize >= 98 && res->pr_Layout >= 3)
             have_nodedt = 1;
+        if (possize >= 98 && res->pr_Layout >= 4)
+            g_layout4 = 1;
         if (possize >= 98 && res->pr_Layout > PTR_LAYOUT_KNOWN)
             printf("note: resource layout v%u is newer than this tool (v%u); "
                    "appended fields are not shown\r\n",
