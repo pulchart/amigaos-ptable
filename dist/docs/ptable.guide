@@ -339,7 +339,12 @@ happens:
     device with, back onto the published entry, so @{fg shine}CF0>MS0@{fg text} is the partition
     scanned as @{fg shine}CF0@{fg text} and mounted as @{fg shine}MS0:@{fg text} . This is the same @{fg shine}RegisterPartition@{fg text} path
     cfd's automount uses, so the @{fg shine}MFlg@{fg text} and @{fg shine}Ctrl@{fg text} columns are accurate whichever way
-    a partition was mounted.
+    a partition was mounted. A partition already mounted by another node is not
+    taken over: fat95 does not claim it (the second mount reports @{fg shine}object in use@{fg text} ),
+    and @{fg shine}RegisterPartition@{fg text} refuses the overlay, so one partition is never served by
+    two handlers. fat95's @{fg shine}m@{fg text} (mount used) Control option overrides its side
+    deliberately, at the user's own risk; the resource still keeps the original
+    registration.
   * The name clashed with an existing mount and was uniquified at register time.
     Two cards whose RDBs both define @{fg shine}DH0@{fg text} give @{fg shine}DH0@{fg text} and @{fg shine}DH0>DH0.1@{fg text} .
 

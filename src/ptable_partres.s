@@ -54,6 +54,8 @@ dbg_pt_static:
 	dc.b	"[PT] static mount kept ",0
 dbg_pt_mountedas:
 	dc.b	"[PT] mounted as ",0
+dbg_pt_regbusy:
+	dc.b	"[PT] register refused, partition already mounted",CR,LF,0
 dbg_pt_absent:
 	dc.b	"[PT] card removed, media absent",CR,LF,0
 	even
@@ -534,6 +536,24 @@ _rm_walk:
 	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
 	tst.l	d0
 	beq.w	_rm_next
+
+;-- ownership: an entry MOUNTED by another node is not overlaid; the
+;   registrant would double-serve a claimed partition, and the entry's
+;   pe_BlobPtr/pe_DevNode pairing would come apart for the teardown.
+;   Re-registering our own node (persistent-handler rebind) passes.
+	move.l	d7,a0
+	btst	#PEB_MOUNTED,pe_Flags(a0)
+	beq.s	_rm_take
+	move.l	pe_DevNode(a0),d0
+	beq.s	_rm_take		;no owner recorded -> take it
+	cmp.l	d0,d6
+	beq.s	_rm_take		;our own node -> refresh
+	ifd	DEBUG
+	lea	dbg_pt_regbusy(pc),a0
+	bsr	_bootDebug
+	endc
+	bra.w	_rm_unlock		;refused: d2 stays 0 (not found)
+_rm_take:
 
 ;-- match: copy the real DOS name into pe_MountName (clamp 31), leaving the
 ;   generated pe_NameB intact; mark mounted, record devnode
