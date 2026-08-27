@@ -310,13 +310,15 @@ synthesizes one: @{fg shine}PREFIX@{fg text} + unit-letter + partition-number.
     in the table, the device's base name with @{fg shine}.device@{fg text} stripped and the @{fg shine}A-Z@{fg text} and @{fg shine}0-9@{fg text}
     characters uppercased. Currently only @{fg shine}compactflash.device@{fg text} has an abbreviation
     ( @{fg shine}CF@{fg text} ); everything else falls back to the base name.
-  * @{b}unit-letter:@{ub} lowercase @{fg shine}a@{fg text} + unit (@{fg shine}a@{fg text} = unit 0, @{fg shine}b@{fg text} = unit 1, up to @{fg shine}p@{fg text} = unit 15).
+  * @{b}unit-letter:@{ub} lowercase @{fg shine}a@{fg text} + unit ( @{fg shine}a@{fg text} = unit 0, @{fg shine}b@{fg text} = unit 1, up to @{fg shine}p@{fg text} = unit 15).
+    Omitted on unit 0 of a device whose abbreviation-table entry is flagged
+    single-unit; currently @{fg shine}compactflash.device@{fg text} , so its names carry no letter.
   * @{b}partition-number:@{ub} 0-based decimal.
 
   @{b}Device@{ub}                     @{b}Unit@{ub}  @{b}Synthesized names@{ub}  
   -------------------------  ----  -----------------  
-  @{fg shine}compactflash.device@{fg text}        0     @{fg shine}CFa0@{fg text}, @{fg shine}CFa1@{fg text}, @{fg shine}CFa2@{fg text}   
-  (abbrev @{fg shine}CF@{fg text} )                                        
+  @{fg shine}compactflash.device@{fg text}        0     @{fg shine}CF0@{fg text}, @{fg shine}CF1@{fg text}, @{fg shine}CF2@{fg text}      
+  (abbrev @{fg shine}CF@{fg text} , single-unit)                           
   @{fg shine}scsi.device@{fg text} (base name to  0     @{fg shine}SCSIa0@{fg text}, @{fg shine}SCSIa1@{fg text}     
   @{fg shine}SCSI@{fg text} )                                              
   @{fg shine}scsi.device@{fg text}                2     @{fg shine}SCSIc0@{fg text}, @{fg shine}SCSIc1@{fg text}     
@@ -324,8 +326,8 @@ synthesizes one: @{fg shine}PREFIX@{fg text} + unit-letter + partition-number.
   @{fg shine}MFM@{fg text} )                                               
 
 To give a device its own abbreviation instead of the base-name fallback,
-add it to @{fg shine}s_devAbbrevTable@{fg text} in @{fg shine}../src/ptable_scan.s@{fg text}
-(../src/ptable_scan.s).
+or to drop the unit letter for a single-unit device, add it to
+@{fg shine}s_devAbbrevTable@{fg text} in @{fg shine}../src/ptable_scan.s@{fg text} (../src/ptable_scan.s).
 
 @{b}Two names, @{fg shine}scanname>dosname@{fg text} .@{ub} @{fg shine}lsptres@{fg text} shows both names when the DOS
 device name differs from the scan name, and there are two ways that
@@ -333,8 +335,8 @@ happens:
 
   * You mount the partition yourself from a static @{fg shine}DEVS:DOSDrivers@{fg text} entry. The
     handler registers its real DOS name, plus the Flags and CONTROL it opened the
-    device with, back onto the published entry, so @{fg shine}CFa0>MS0@{fg text} is the partition
-    scanned as @{fg shine}CFa0@{fg text} and mounted as @{fg shine}MS0:@{fg text} . This is the same @{fg shine}RegisterPartition@{fg text} path
+    device with, back onto the published entry, so @{fg shine}CF0>MS0@{fg text} is the partition
+    scanned as @{fg shine}CF0@{fg text} and mounted as @{fg shine}MS0:@{fg text} . This is the same @{fg shine}RegisterPartition@{fg text} path
     cfd's automount uses, so the @{fg shine}MFlg@{fg text} and @{fg shine}Ctrl@{fg text} columns are accurate whichever way
     a partition was mounted.
   * The name clashed with an existing mount and was uniquified at register time.
@@ -518,7 +520,7 @@ what the other skip reason means:
   [PT] cold boot: scanning for partitions
   [PT] GPT partition table
   [PT] new partitions: 1
-  [PT] - skip  CFa0 (not RDB: mounted at DOS time)
+  [PT] - skip  CF0 (not RDB: mounted at DOS time)
   [PT] cold boot done, partitions registered: 0
 @{fg text}
 
@@ -534,9 +536,9 @@ partitions:
   [MW] scan done, new partitions: 3
   [MW] mounting new partitions
   [PT] mounting partitions
-  [PT] mounted CFa0 (FAT., 2048 MB)
-  [PT] mounted CFa1 (FAT., 4096 MB)
-  [PT] mounted CFa2 (FAT., 8192 MB)
+  [PT] mounted CF0 (FAT., 2048 MB)
+  [PT] mounted CF1 (FAT., 4096 MB)
+  [PT] mounted CF2 (FAT., 8192 MB)
   [MW] mounted volumes: 3
 @{fg text}
 
@@ -552,9 +554,9 @@ in @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ):
 @{fg highlight}
   Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-  CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
-  CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
-  CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
+  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
+  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
+  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
 @{fg text}
 
 All three are mounted ( @{fg shine}P--M@{fg text} ), with the @{fg shine}Ctrl@{fg text} value @{fg shine}-d-D@{fg text} resolved from
@@ -574,9 +576,9 @@ The count is @{fg shine}MarkAbsent@{fg text} 's return: entries whose present fl
 cleared, not mounts torn down (none are).
 
 @{fg highlight}
-  CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
-  CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. ---M      0 -d-D
-  CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
+  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
+  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. ---M      0 -d-D
+  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
 @{fg text}
 
 @{b}Card removed, teardown policy.@{ub} With the default list, or @{fg shine}UNMOUNT FAT@{fg text}
@@ -585,9 +587,9 @@ here, the FAT partitions are unmounted and dropped from the resource:
 @{fg highlight}
   [MW] card removed
   [PT] unmounting partitions
-  [PT] unmounted CFa0
-  [PT] unmounted CFa1
-  [PT] unmounted CFa2
+  [PT] unmounted CF0
+  [PT] unmounted CF1
+  [PT] unmounted CF2
   [MW] entries detached: 3
 @{fg text}
 

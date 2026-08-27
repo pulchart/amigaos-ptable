@@ -53,9 +53,9 @@ The card was inserted at runtime; `cfd.prefs` set `CONTROL_FAT -d-D`, so that va
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
 ```
 
 The `P--M` flags read: present, mounted (not bootable, not nomount). The DosType is `0x464154FF`, not the `0x46415400` detected on the card: these are mounted, and the node a FAT handler auto-detects with carries the device-scheme DosType. Its Text is `FAT.`, the trailing `\xFF` printing as `.` like any non-printable byte.
@@ -64,17 +64,17 @@ The `P--M` flags read: present, mounted (not bootable, not nomount). The DosType
 
 Starting from the three-FAT GPT card above (all `P--M`), that card was removed and a single-partition MBR card inserted in its place.
 
-The scan re-matches the new card's one partition to the `CFa0` slot, and its Src flips `GPT` to `MBR`, the fresh card's scheme. The `CFa1` and `CFa2` handlers were never unmounted and the MBR card has no partition for them, so those slots go `I` (invalid): the present bit clears while mounted stays.
+The scan re-matches the new card's one partition to the `CF0` slot, and its Src flips `GPT` to `MBR`, the fresh card's scheme. The `CF1` and `CF2` handlers were never unmounted and the MBR card has no partition for them, so those slots go `I` (invalid): the present bit clears while mounted stays.
 
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-CFa0         compactflash.    0    0 MBR   0 0x464154FF FAT. P--M      0 -d-D
-CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. I--M      0 -d-D
-CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. I--M      0 -d-D
+CF0          compactflash.    0    0 MBR   0 0x464154FF FAT. P--M      0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. I--M      0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. I--M      0 -d-D
 ```
 
-`CFa0` re-mounted cleanly as `P--M` with the new card's `MBR` scheme. `CFa1` / `CFa2` read `I--M` - invalid but still mounted: the handlers hold the mounts, and their Src stays `GPT` (the removed card's value) since nothing refreshed them. Contrast a card pulled with no replacement: those slots read `---M` (leading `-`), plain absent rather than invalid.
+`CF0` re-mounted cleanly as `P--M` with the new card's `MBR` scheme. `CF1` / `CF2` read `I--M` - invalid but still mounted: the handlers hold the mounts, and their Src stays `GPT` (the removed card's value) since nothing refreshed them. Contrast a card pulled with no replacement: those slots read `---M` (leading `-`), plain absent rather than invalid.
 
 ### An RDB card with PFS partitions
 
@@ -96,7 +96,7 @@ SDH2         compactflash.    0    4 RDB   0 0x50465303 PFS. P--M      0
 layout v3, entry size 260
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl       CMD        Start      Blocks   Size
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ---------- ----------- ------
-CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD       2048     4194304  2048M
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD       2048     4194304  2048M
 ```
 
 ## See also

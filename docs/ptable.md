@@ -79,21 +79,21 @@ graph TD
 **MBR, GPT and flat** partitions carry no on-disk name, so the library synthesizes one: `PREFIX` + unit-letter + partition-number.
 
 - **PREFIX:** a short device abbreviation from a built-in table, or, for devices not in the table, the device's base name with `.device` stripped and the `A-Z` and `0-9` characters uppercased. Currently only `compactflash.device` has an abbreviation (`CF`); everything else falls back to the base name.
-- **unit-letter:** lowercase `a` + unit (`a` = unit 0, `b` = unit 1, up to `p` = unit 15).
+- **unit-letter:** lowercase `a` + unit (`a` = unit 0, `b` = unit 1, up to `p` = unit 15). Omitted on unit 0 of a device whose abbreviation-table entry is flagged single-unit; currently `compactflash.device`, so its names carry no letter.
 - **partition-number:** 0-based decimal.
 
 | Device | Unit | Synthesized names |
 |--------|------|-------------------|
-| `compactflash.device` (abbrev `CF`) | 0 | `CFa0`, `CFa1`, `CFa2` |
+| `compactflash.device` (abbrev `CF`, single-unit) | 0 | `CF0`, `CF1`, `CF2` |
 | `scsi.device` (base name to `SCSI`) | 0 | `SCSIa0`, `SCSIa1` |
 | `scsi.device` | 2 | `SCSIc0`, `SCSIc1` |
 | `mfm.device` (base name to `MFM`) | 1 | `MFMb0`, `MFMb1` |
 
-To give a device its own abbreviation instead of the base-name fallback, add it to `s_devAbbrevTable` in [`../src/ptable_scan.s`](../src/ptable_scan.s).
+To give a device its own abbreviation instead of the base-name fallback, or to drop the unit letter for a single-unit device, add it to `s_devAbbrevTable` in [`../src/ptable_scan.s`](../src/ptable_scan.s).
 
 **Two names, `scanname>dosname`.** `lsptres` shows both names when the DOS device name differs from the scan name, and there are two ways that happens:
 
-- You mount the partition yourself from a static `DEVS:DOSDrivers` entry. The handler registers its real DOS name, plus the Flags and CONTROL it opened the device with, back onto the published entry, so `CFa0>MS0` is the partition scanned as `CFa0` and mounted as `MS0:`. This is the same `RegisterPartition` path cfd's automount uses, so the `MFlg` and `Ctrl` columns are accurate whichever way a partition was mounted.
+- You mount the partition yourself from a static `DEVS:DOSDrivers` entry. The handler registers its real DOS name, plus the Flags and CONTROL it opened the device with, back onto the published entry, so `CF0>MS0` is the partition scanned as `CF0` and mounted as `MS0:`. This is the same `RegisterPartition` path cfd's automount uses, so the `MFlg` and `Ctrl` columns are accurate whichever way a partition was mounted.
 - The name clashed with an existing mount and was uniquified at register time. Two cards whose RDBs both define `DH0` give `DH0` and `DH0>DH0.1`.
 
 ## Configuration
@@ -172,7 +172,7 @@ A FAT card at cold boot is published and left for DOS time, which is what the ot
 [PT] cold boot: scanning for partitions
 [PT] GPT partition table
 [PT] new partitions: 1
-[PT] - skip  CFa0 (not RDB: mounted at DOS time)
+[PT] - skip  CF0 (not RDB: mounted at DOS time)
 [PT] cold boot done, partitions registered: 0
 ```
 
@@ -186,9 +186,9 @@ A FAT card at cold boot is published and left for DOS time, which is what the ot
 [MW] scan done, new partitions: 3
 [MW] mounting new partitions
 [PT] mounting partitions
-[PT] mounted CFa0 (FAT., 2048 MB)
-[PT] mounted CFa1 (FAT., 4096 MB)
-[PT] mounted CFa2 (FAT., 8192 MB)
+[PT] mounted CF0 (FAT., 2048 MB)
+[PT] mounted CF1 (FAT., 4096 MB)
+[PT] mounted CF2 (FAT., 8192 MB)
 [MW] mounted volumes: 3
 ```
 
@@ -199,9 +199,9 @@ The resulting `partition.resource`, listed by `lsptres` (columns explained in [`
 ```
 Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
 ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
-CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
 ```
 
 All three are mounted (`P--M`), with the `Ctrl` value `-d-D` resolved from `CONTROL_FAT` in `cfd.prefs`.
@@ -217,9 +217,9 @@ All three are mounted (`P--M`), with the `Ctrl` value `-d-D` resolved from `CONT
 The count is `MarkAbsent`'s return: entries whose present flag was cleared, not mounts torn down (none are).
 
 ```
-CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
-CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. ---M      0 -d-D
-CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. ---M      0 -d-D
+CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. ---M      0 -d-D
+CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
 ```
 
 **Card removed, teardown policy.** With the default list, or `UNMOUNT FAT` here, the FAT partitions are unmounted and dropped from the resource:
@@ -227,9 +227,9 @@ CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. ---M      0 -d-D
 ```
 [MW] card removed
 [PT] unmounting partitions
-[PT] unmounted CFa0
-[PT] unmounted CFa1
-[PT] unmounted CFa2
+[PT] unmounted CF0
+[PT] unmounted CF1
+[PT] unmounted CF2
 [MW] entries detached: 3
 ```
 
