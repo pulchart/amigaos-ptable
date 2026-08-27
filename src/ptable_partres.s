@@ -52,6 +52,8 @@ dbg_pt_unmounted:
 	dc.b	"[PT] unmounted ",0
 dbg_pt_static:
 	dc.b	"[PT] static mount kept ",0
+dbg_pt_unreg:
+	dc.b	"[PT] unregistered ",0
 dbg_pt_mountedas:
 	dc.b	"[PT] mounted as ",0
 dbg_pt_regbusy:
@@ -676,6 +678,76 @@ _ma_unlock:
 	endc
 	bsr	_partUnlockRes
 _ma_unlocked:
+	move.l	d2,d0
+	movem.l	(sp)+,d2-d7/a2-a6
+	rts
+
+;===========================================================
+; UnregisterPartition(deviceName: a1, unit: d0, startLBA: d1,
+;                     devNode: a2)  -> d0 = 1 cleared / 0 not found or busy
+; Inverse of RegisterPartition, for a handler leaving voluntarily
+; (ACTION_DIE accepted outside a ptable teardown): clear the mounted
+; overlay so the entry returns to published-only and the partition is
+; the automount's again. Only the registrant clears its own mount
+; (pe_DevNode must equal devNode). Best-effort lock like MarkAbsent:
+; a busy PTR_Lock means a ptable teardown owns the entry and frees it
+; itself, so just skip. a6 = library base. Exec-only.
+;===========================================================
+UnregisterPartition:
+	movem.l	d2-d7/a2-a6,-(sp)
+	move.l	d0,d3			;d3 = unit
+	move.l	d1,d4			;d4 = startLBA
+	move.l	a1,a4			;a4 = device name (C string)
+	move.l	a2,d6			;d6 = devNode
+	move.l	RDBL_ExecBase(a6),a5
+	moveq.l	#0,d2			;d2 = result (0 = nothing cleared)
+	tst.l	d6			;no node -> nothing this caller owns
+	beq.s	_ur_unlocked
+	bsr	_partTryLockRes		;d0 = resource ptr (0 = fail/busy)
+	tst.l	d0
+	beq.s	_ur_unlocked
+	move.l	d0,a0
+	lea	PTR_PartList(a0),a0
+	move.l	(a0),d7			;d7 = first node
+_ur_walk:
+	move.l	d7,a0			;a0 = entry
+	move.l	(a0),d1			;d1 = succ
+	beq.s	_ur_unlock		;tail -> not found
+	cmp.l	pe_Unit(a0),d3
+	bne.s	_ur_next
+	cmp.l	pe_StartLBA(a0),d4
+	bne.s	_ur_next
+	cmp.l	pe_DevNode(a0),d6	;only the entry's own registrant
+	bne.s	_ur_next
+	move.l	pe_Device(a0),a0	;a0 = entry's device C string
+	move.l	a4,a1			;a1 = wanted device name
+	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
+	tst.l	d0
+	beq.s	_ur_next
+;-- clear the mount overlay; the published scan data stays
+	move.l	d7,a0
+	bclr	#PEB_MOUNTED,pe_Flags(a0)
+	bclr	#PEB_INVALID,pe_Flags(a0)
+	clr.l	pe_DevNode(a0)
+	clr.b	pe_MountName(a0)	;empty BSTR
+	clr.l	pe_MountFlags(a0)
+	clr.b	pe_Control(a0)
+	clr.l	pe_NodeDosType(a0)
+	moveq.l	#1,d2
+	ifd	DEBUG
+	lea	dbg_pt_unreg(pc),a0
+	bsr	_bootDebug
+	move.l	d7,a0
+	lea	pe_NameB(a0),a0
+	bsr	_bootDebugBStr
+	endc
+	bra.s	_ur_unlock
+_ur_next:
+	move.l	d1,d7			;cursor = succ
+	bra.s	_ur_walk
+_ur_unlock:
+	bsr	_partUnlockRes
+_ur_unlocked:
 	move.l	d2,d0
 	movem.l	(sp)+,d2-d7/a2-a6
 	rts

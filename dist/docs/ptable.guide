@@ -349,6 +349,13 @@ happens:
   * The name clashed with an existing mount and was uniquified at register time.
     Two cards whose RDBs both define @{fg shine}DH0@{fg text} give @{fg shine}DH0@{fg text} and @{fg shine}DH0>DH0.1@{fg text} .
 
+A handler that leaves voluntarily (its @{fg shine}ACTION_DIE@{fg text} accepted, e.g.
+@{fg shine}MOUNT <dev>: SHUTDOWN@{fg text} ) unregisters its mount on the way out: the entry
+returns to published-only ( @{fg shine}P----@{fg text} ) and the partition is the automount's
+again. A handler that disappears without that (killed, crashed) leaves
+the entry claimed until the next card removal under a tearing @{fg shine}UNMOUNT@{fg text}
+policy cleans it.
+
 ----------------------------------------
 @{"<< Prev" link Flows}  @{"Contents" link Main}  @{"Next >>" link Configuration}
 

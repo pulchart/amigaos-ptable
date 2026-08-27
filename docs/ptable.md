@@ -96,6 +96,8 @@ To give a device its own abbreviation instead of the base-name fallback, or to d
 - You mount the partition yourself from a static `DEVS:DOSDrivers` entry. The handler registers its real DOS name, plus the Flags and CONTROL it opened the device with, back onto the published entry, so `CF0>MS0` is the partition scanned as `CF0` and mounted as `MS0:`. This is the same `RegisterPartition` path cfd's automount uses, so the `MFlg` and `Ctrl` columns are accurate whichever way a partition was mounted. A partition already mounted by another node is not taken over: fat95 does not claim it (the second mount reports `object in use`), and `RegisterPartition` refuses the overlay, so one partition is never served by two handlers. The `MOUNT_USED 1` policy in `cfd.prefs` (stamped into the entries like `UNMOUNT_STATIC`, so it takes effect on the next insert) overrides the handler's side deliberately, at the user's own risk; the resource still keeps the original registration.
 - The name clashed with an existing mount and was uniquified at register time. Two cards whose RDBs both define `DH0` give `DH0` and `DH0>DH0.1`.
 
+A handler that leaves voluntarily (its `ACTION_DIE` accepted, e.g. `MOUNT <dev>: SHUTDOWN`) unregisters its mount on the way out: the entry returns to published-only (`P----`) and the partition is the automount's again. A handler that disappears without that (killed, crashed) leaves the entry claimed until the next card removal under a tearing `UNMOUNT` policy cleans it.
+
 ## Configuration
 
 `ptable.library` has no preferences file of its own. Its behaviour comes from two places.

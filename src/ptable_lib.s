@@ -227,6 +227,7 @@ s_functable:
 	dc.w	UnmountPartitions-s_functable
 	dc.w	RegisterPartition-s_functable
 	dc.w	MarkAbsent-s_functable
+	dc.w	UnregisterPartition-s_functable
 	dc.w	-1
 
 ;--- s_initfunc: called by Exec.MakeLibrary scaffolding ----
