@@ -339,7 +339,7 @@ _scanPubRec:
 
 ;-- same slot already present (rescan / card swap)?  refresh it in place
 	moveq.l	#0,d0
-	move.b	PR_PartIndex(a2),d0	;identity = partition index (CFa<index>)
+	move.b	PR_PartIndex(a2),d0	;identity = partition index (CF<index>)
 	bsr	_scanFindByIndex
 	tst.l	d0
 	bne.s	_spc_upd
@@ -526,12 +526,14 @@ _sle_out:
 ; pe_NameB. Used only for table-less media (MBR/GPT/superfloppy); RDB
 ; keeps its on-disk pb_DriveName.
 ;
-; Name = PREFIX + unit + partition
+; Name = PREFIX + [unit] + partition
 ;   PREFIX  abbreviation table value, else the device base name (trailing
 ;           ".device" stripped, kept A-Z/0-9 uppercased), truncated to fit
-;   unit    lowercase letter 'a' + unit   (a..p for units 0..15)
+;   unit    lowercase letter 'a' + unit (a..p for units 0..15); omitted
+;           for unit 0 of a table entry flagged DABF_NOUNIT (single-unit
+;           device)
 ;   part    decimal partition index, 0-based
-; e.g. compactflash.device unit 0 -> CFa0 CFa1 CFa2   (table -> CF)
+; e.g. compactflash.device unit 0 -> CF0 CF1 CF2   (table -> CF, no unit)
 ;      scsi.device         unit 0 -> SCSIa0 SCSIa1
 ;
 ; In : a3 = entry, d0 = partition index (0-based), a4 = &BootCtx
@@ -545,14 +547,12 @@ _scanSynthName:
 ;-- partition digit count (1 or 2; indexes are well under 100)
 	moveq.l	#1,d5
 	cmp.l	#10,d4
-	blo.s	_ssn_budget
+	blo.s	_ssn_pref
 	addq.l	#1,d5
-_ssn_budget:
-;-- prefix budget = 31 - unit(1) - partition(d5)
-	moveq.l	#31-1,d6
-	sub.l	d5,d6
+_ssn_pref:
 
-;-- PREFIX: abbreviation table first
+;-- PREFIX: abbreviation table first (d3 = 1 while the unit letter is kept)
+	moveq.l	#1,d3
 	move.l	a1,-(sp)		;save cursor across the table search
 	lea	s_devAbbrevTable(pc),a2
 _ssn_tbl:
@@ -563,9 +563,22 @@ _ssn_tbl:
 	bsr	_psStrEq		;preserves a0/a1, sets d0
 	tst.l	d0
 	bne.s	_ssn_hit
-	lea	8(a2),a2		;next record (name ptr + abbrev ptr)
+	lea	12(a2),a2		;next record (name + abbrev + flags)
 	bra.s	_ssn_tbl
 _ssn_hit:
+;-- single-unit device: omit the unit letter. Unit 0 only; a nonzero unit
+;   on such a device keeps its letter so the names stay unique.
+	move.l	8(a2),d0		;record flags
+	btst	#DABF_NOUNIT,d0
+	beq.s	_ssn_budget
+	tst.l	BC_Unit(a4)
+	bne.s	_ssn_budget
+	moveq.l	#0,d3
+_ssn_budget:
+;-- prefix budget = 31 - unit letter (d3: 0 or 1) - partition (d5)
+	moveq.l	#31,d6
+	sub.l	d3,d6
+	sub.l	d5,d6
 	move.l	4(a2),a0		;abbrev string
 	move.l	(sp)+,a1		;restore cursor
 _ssn_cpy:				;copy NUL-terminated abbrev, capped at d6
@@ -580,6 +593,9 @@ _ssn_cpy:				;copy NUL-terminated abbrev, capped at d6
 ;-- PREFIX: derive from the device base name
 _ssn_miss:
 	move.l	(sp)+,a1		;restore cursor
+;-- prefix budget = 31 - unit(1) - partition(d5)
+	moveq.l	#31-1,d6
+	sub.l	d5,d6
 	move.l	BC_DevName(a4),a0
 	bsr	_scanBaseLen		;d0 = base char count (".device" stripped)
 	move.l	d0,d2			;d2 = base chars remaining
@@ -605,11 +621,15 @@ _ssn_dput:
 	subq.l	#1,d6
 	bra.s	_ssn_drv
 
-;-- unit letter ('a' + unit; documented range a..p = units 0..15)
+;-- unit letter ('a' + unit; documented range a..p = units 0..15),
+;   suppressed when the table flagged this device DABF_NOUNIT (d3 = 0)
 _ssn_unit:
+	tst.l	d3
+	beq.s	_ssn_part
 	move.l	BC_Unit(a4),d0
 	add.b	#'a',d0
 	move.b	d0,(a1)+
+_ssn_part:
 
 ;-- partition: 0-based decimal (1-2 digits)
 	move.l	d4,d0
@@ -681,12 +701,13 @@ _scanUpper:
 _sup_x:
 	rts
 
-;-- abbreviation overrides: records of {APTR device name, APTR abbrev},
-;   terminated by a NULL name pointer
+;-- abbreviation overrides: records of {APTR device name, APTR abbrev,
+;   LONG flags}, terminated by a NULL name pointer
+DABF_NOUNIT = 0		;flag bit: single-unit device, omit the unit letter
 	even
 s_devAbbrevTable:
-	dc.l	s_dn_compactflash,s_ab_cf
-	dc.l	0,0
+	dc.l	s_dn_compactflash,s_ab_cf,1<<DABF_NOUNIT
+	dc.l	0
 s_dn_compactflash:
 	dc.b	"compactflash.device",0
 s_ab_cf:
@@ -827,7 +848,7 @@ _spg_out:
 ; _scanFindByIndex / _scanFindSlot: find the entry for this slot,
 ; matched by device + unit + ONE identity field:
 ;   _scanFindByIndex: pe_PartIndex - the synthesized schemes
-;     (MBR/GPT/FLAT) name a slot by its index (CFa<index>), so the
+;     (MBR/GPT/FLAT) name a slot by its index (CF<index>), so the
 ;     same slot is reused across card swaps regardless of where the
 ;     partition starts or how big it is.
 ;   _scanFindSlot: pe_StartLBA - RDB carries real names; a card has

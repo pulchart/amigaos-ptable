@@ -493,7 +493,7 @@ _amo_walk:
 	bne.w	_amo_next
 
 ;-- reuse a persistent slot node if one with this name already exists
-;   (same card reinserted, or a different card reusing the CFa<i> slot): the
+;   (same card reinserted, or a different card reusing the CF<i> slot): the
 ;   auto-detect handler re-binds the current partition itself, so we only bind
 ;   the entry to it, with no second AddDosNode (which would .N-suffix the name).
 	lea	pe_NameB(a3),a0

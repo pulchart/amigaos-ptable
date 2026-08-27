@@ -200,11 +200,13 @@ PERM_CMD	= 4			;CMD_READ
 ; pe_NameB naming:
 ;   RDB    -> the on-disk pb_DriveName, verbatim.
 ;   MBR/GPT/FLAT (no on-disk name) -> synthesized as
-;            <PREFIX><unit-letter><partition-number>
+;            <PREFIX>[<unit-letter>]<partition-number>
 ;            PREFIX device abbreviation (see below)
-;            unit   'a'+unit  (a = unit 0, b = unit 1, ... p = unit 15)
+;            unit   'a'+unit  (a = unit 0, b = unit 1, ... p = unit 15);
+;                   omitted for unit 0 of a table entry flagged
+;                   DABF_NOUNIT (single-unit device)
 ;            part   decimal partition number, 0-based
-;            e.g. compactflash.device unit 0 -> CFa0 CFa1 CFa2
+;            e.g. compactflash.device unit 0 -> CF0 CF1 CF2 (DABF_NOUNIT)
 ;                 scsi.device         unit 0 -> SCSIa0 SCSIa1 ...
 ;   The prefix comes from a known-device abbreviation table
 ;   (compactflash.device -> CF; extend s_devAbbrevTable in
@@ -234,7 +236,7 @@ DOSTYPE_FAT	= $46415400
 ;-- fat95's "device-name scheme" dostype: a hotplug node built with this
 ;   DE_DOSTYPE (and de_LowCyl=0) binds to fat95, auto-detects its partition
 ;   per inserted card, and takes its partition selector from the node name's
-;   trailing digit (CFa0/CFa1/...). Lets one persistent handler track any
+;   trailing digit (CF0/CF1/...). Lets one persistent handler track any
 ;   card layout. Must match fat95's DEVICE_DOSTYPE_MARKER.
 DEVICE_DOSTYPE_MARKER = $464154FF
 

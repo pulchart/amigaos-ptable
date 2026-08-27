@@ -172,9 +172,9 @@ that value appears in the Ctrl column and applies to every FAT mount.
 @{fg highlight}
   Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-  CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
-  CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
-  CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
+  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D
+  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. P--M      0 -d-D
+  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. P--M      0 -d-D
 @{fg text}
 
 The @{fg shine}P--M@{fg text} flags read: present, mounted (not bootable, not nomount). The
@@ -194,8 +194,8 @@ device-scheme DosType. Its Text is @{fg shine}FAT.@{fg text} , the trailing @{fg
 Starting from the three-FAT GPT card above (all @{fg shine}P--M@{fg text} ), that card was
 removed and a single-partition MBR card inserted in its place.
 
-The scan re-matches the new card's one partition to the @{fg shine}CFa0@{fg text} slot, and
-its Src flips @{fg shine}GPT@{fg text} to @{fg shine}MBR@{fg text} , the fresh card's scheme. The @{fg shine}CFa1@{fg text} and @{fg shine}CFa2@{fg text}
+The scan re-matches the new card's one partition to the @{fg shine}CF0@{fg text} slot, and
+its Src flips @{fg shine}GPT@{fg text} to @{fg shine}MBR@{fg text} , the fresh card's scheme. The @{fg shine}CF1@{fg text} and @{fg shine}CF2@{fg text}
 handlers were never unmounted and the MBR card has no partition for
 them, so those slots go @{fg shine}I@{fg text} (invalid): the present bit clears while
 mounted stays.
@@ -203,16 +203,16 @@ mounted stays.
 @{fg highlight}
   Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ----------
-  CFa0         compactflash.    0    0 MBR   0 0x464154FF FAT. P--M      0 -d-D
-  CFa1         compactflash.    0    1 GPT   0 0x464154FF FAT. I--M      0 -d-D
-  CFa2         compactflash.    0    2 GPT   0 0x464154FF FAT. I--M      0 -d-D
+  CF0          compactflash.    0    0 MBR   0 0x464154FF FAT. P--M      0 -d-D
+  CF1          compactflash.    0    1 GPT   0 0x464154FF FAT. I--M      0 -d-D
+  CF2          compactflash.    0    2 GPT   0 0x464154FF FAT. I--M      0 -d-D
 @{fg text}
 
-@{fg shine}CFa0@{fg text} re-mounted cleanly as @{fg shine}P--M@{fg text} with the new card's @{fg shine}MBR@{fg text} scheme. @{fg shine}CFa1@{fg text} /
-@{fg shine}CFa2@{fg text} read @{fg shine}I--M@{fg text} - invalid but still mounted: the handlers hold the
-mounts, and their Src stays @{fg shine}GPT@{fg text} (the removed card's value) since nothing
-refreshed them. Contrast a card pulled with no replacement: those slots
-read @{fg shine}---M@{fg text} (leading @{fg shine}-@{fg text} ), plain absent rather than invalid.
+@{fg shine}CF0@{fg text} re-mounted cleanly as @{fg shine}P--M@{fg text} with the new card's @{fg shine}MBR@{fg text} scheme. @{fg shine}CF1@{fg text} / @{fg shine}CF2@{fg text}
+read @{fg shine}I--M@{fg text} - invalid but still mounted: the handlers hold the mounts, and
+their Src stays @{fg shine}GPT@{fg text} (the removed card's value) since nothing refreshed
+them. Contrast a card pulled with no replacement: those slots read @{fg shine}---M@{fg text}
+(leading @{fg shine}-@{fg text} ), plain absent rather than invalid.
 
 ----------------------------------------
 @{"<< Prev" link A_GPT_card_with_three_FAT_partitions__mounted}  @{"Contents" link Main}  @{"Next >>" link An_RDB_card_with_PFS_partitions}
@@ -249,7 +249,7 @@ empty.
   layout v3, entry size 260
   Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl       CMD        Start      Blocks   Size
   ------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ---------- ----------- ------
-  CFa0         compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD       2048     4194304  2048M
+  CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M      0 -d-D       NSCMD       2048     4194304  2048M
 @{fg text}
 
 ----------------------------------------
