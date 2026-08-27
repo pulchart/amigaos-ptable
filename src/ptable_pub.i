@@ -78,17 +78,20 @@ mc_Size		= 20			;ULONG the caller's mc_Sizeof. MountCfg's
 					;by appending a field and bumping mc_Sizeof.
 					;The 2.0 fields above are baseline and are
 					;always read.
-mc_UnmFlags	= 24			;ULONG unmount-policy bits (MCUF_*), read only
-					;when mc_Size >= 28. MountPartitions stamps
-					;MCUF_KEEPSTATIC into PEB_KEEPSTATIC on every
-					;entry it walks for the device+unit, so the
-					;policy becomes resource state UnmountPartitions
-					;and lsptres both read.
+mc_UnmFlags	= 24			;ULONG policy bits (MCUF_*), read only when
+					;mc_Size >= 28. MountPartitions stamps them
+					;into the PEB_ policy bits on every entry it
+					;walks for the device+unit, so the policy
+					;becomes resource state that UnmountPartitions,
+					;handlers and lsptres all read.
 mc_Sizeof	= 28
 
 MCUF_KEEPSTATIC	= 0			;keep static mounts on card removal
+					;(-> PEB_KEEPSTATIC)
 MCUF_STAMPONLY	= 1			;walk + stamp the policy, mount nothing
 					;(caller has its own mounting disabled)
+MCUF_MOUNTUSED	= 2			;a hand mountlist may claim an entry another
+					;handler already serves (-> PEB_MOUNTUSED)
 ;
 ; Override row (array terminated by ovr_Prefix = 0):
 ovr_Prefix	= 0			;ULONG dostype high 3 bytes ('DOS\0' etc); 0 = end
@@ -256,6 +259,12 @@ PEB_KEEPSTATIC	= 5			;layout v4: keep this entry's static mount on
 					;mc_UnmFlags MCUF_KEEPSTATIC on every entry it
 					;walks; meaningful only with pe_BlobPtr = 0
 					;(a node this library did not build).
+PEB_MOUNTUSED	= 6			;layout v4: a hand mountlist may claim this
+					;entry even while another handler serves it
+					;(the user's own risk; writes corrupt the
+					;volume). Stamped by MountPartitions from
+					;mc_UnmFlags MCUF_MOUNTUSED; read by fat95's
+					;auto-detect ownership gate.
 
 ;-- DosType stamped on FAT partitions (fat95 registers $46415400|n)
 DOSTYPE_FAT	= $46415400
