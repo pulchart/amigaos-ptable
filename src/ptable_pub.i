@@ -111,6 +111,7 @@ _LVOMountPartitions	= -42
 _LVOUnmountPartitions	= -48
 _LVORegisterPartition	= -54
 _LVOMarkAbsent		= -60
+_LVOUnregisterPartition	= -66
 ;
 ; RegisterPartition(deviceName: a1, unit: d0, startLBA: d1, blockCount: d2,
 ;               nameBSTR: a0, devNode: a2, flags: d3, control: d4,
@@ -129,6 +130,17 @@ _LVOMarkAbsent		= -60
 ;   would bless a second handler on a served partition and desynchronise the
 ;   pe_DevNode/pe_BlobPtr teardown pairing. Re-registering the entry's own
 ;   node (rebind) succeeds. Exec-only.
+;
+; UnregisterPartition(deviceName: a1, unit: d0, startLBA: d1, devNode: a2)
+;                                                  -> d0 = 1 cleared / 0 no-op
+;   Inverse of RegisterPartition, for a handler that leaves voluntarily
+;   (its ACTION_DIE was accepted outside a ptable teardown): clears
+;   PEB_MOUNTED/pe_DevNode/pe_MountName and the recorded mount values, so
+;   the entry returns to published-only and the partition is the
+;   automount's again. Only the entry's own registrant may clear it
+;   (pe_DevNode must equal devNode). Attempts PTR_Lock like MarkAbsent
+;   and skips when it is busy: a ptable teardown then owns the entry and
+;   frees it itself. Exec-only.
 ;
 ; MarkAbsent(deviceName: a1, unit: d0)            -> d0 = count cleared
 ;   Card removed: clear PEB_PRESENT on every entry for device+unit, keeping
