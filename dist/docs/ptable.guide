@@ -48,8 +48,9 @@
 @{fg shine}ptable.library@{fg text} parses every partition scheme a removable card might
 carry ( @{b}RDB@{ub} , @{b}MBR@{ub} , @{b}GPT@{ub} , and the partition-table-less @{b}flat@{ub} superfloppy,
 a whole-disk FAT volume) and publishes the result into
-@{fg shine}partition.resource@{fg text} . A device driver and a filesystem handler then share
-that one parse instead of each carrying its own.
+@{fg shine}partition.resource@{fg text} . Any driver or handler reads the layout from there
+instead of parsing the card itself, so one parse is shared rather than
+repeated.
 
 You never run it yourself; other components open it. This document
 explains what it does, what you see when it works, and how its behaviour
@@ -70,13 +71,13 @@ amigaos-kickstart-builder
 Two jobs, at two different times.
 
 @{b}Cold-boot autoboot.@{ub} At Kickstart cold start, before DOS exists, the
-@{fg shine}compactflash.autoboot@{fg text} module calls @{fg shine}BootScanPartitions@{fg text} . The library
-scans the card, publishes every partition it finds into
-@{fg shine}partition.resource@{fg text} , loads any filesystem handlers stored in the RDB
-into @{fg shine}FileSystem.resource@{fg text} , and then registers the @{b}RDB@{ub} partitions: the
-bootable ones with @{fg shine}AddBootNode@{fg text} so they appear in the Early Startup boot
-menu, the rest with @{fg shine}AddDosNode@{fg text} . This is what lets you boot straight off
-an RDB-partitioned card in the PCMCIA slot.
+@{fg shine}compactflash.autoboot@{fg text} cold stub (a romtag inside @{fg shine}compactflash.automount@{fg text}
+) calls @{fg shine}BootScanPartitions@{fg text} . The library scans the card, publishes every
+partition it finds into @{fg shine}partition.resource@{fg text} , loads any filesystem
+handlers stored in the RDB into @{fg shine}FileSystem.resource@{fg text} , and then registers
+the @{b}RDB@{ub} partitions: the bootable ones with @{fg shine}AddBootNode@{fg text} so they appear in
+the Early Startup boot menu, the rest with @{fg shine}AddDosNode@{fg text} . This is what
+lets you boot straight off an RDB-partitioned card in the PCMCIA slot.
 
 MBR, GPT and flat partitions are published but not registered at cold
 boot: DOS does not exist yet, so their mount configuration cannot be
@@ -652,18 +653,20 @@ included.
                     nameBSTR:a0, devNode:a2, flags:d3, control:d4,
                     nodeDosType:d5)                                 -54
   MarkAbsent(deviceName:a1, unit:d0)                         -60
+  UnregisterPartition(deviceName:a1, unit:d0, startLBA:d1, devNode:a2)  -66
 @{fg text}
 
-  @{b}LVO@{ub}                 @{b}Returns in d0@{ub}           @{b}Call from@{ub}                 
-  ------------------  ----------------------  ------------------------  
-  @{fg shine}BootScanPartitions@{fg text}  partitions registered   @{fg shine}RTF_COLDSTART@{fg text} , pre-DOS,  
-                                              single task               
-  @{fg shine}ScanPartitions@{fg text}      partitions @{b}newly@{ub}        any task, Exec context    
-                      published                                         
-  @{fg shine}MountPartitions@{fg text}     partitions mounted      a process                 
-  @{fg shine}UnmountPartitions@{fg text}   entries torn down       a process                 
-  @{fg shine}RegisterPartition@{fg text}   1 updated, 0 not found  any task, Exec context    
-  @{fg shine}MarkAbsent@{fg text}          entries cleared         any task, Exec context    
+  @{b}LVO@{ub}                  @{b}Returns in d0@{ub}           @{b}Call from@{ub}                 
+  -------------------  ----------------------  ------------------------  
+  @{fg shine}BootScanPartitions@{fg text}   partitions registered   @{fg shine}RTF_COLDSTART@{fg text} , pre-DOS,  
+                                               single task               
+  @{fg shine}ScanPartitions@{fg text}       partitions @{b}newly@{ub}        any task, Exec context    
+                       published                                         
+  @{fg shine}MountPartitions@{fg text}      partitions mounted      a process                 
+  @{fg shine}UnmountPartitions@{fg text}    entries torn down       a process                 
+  @{fg shine}RegisterPartition@{fg text}    1 updated, 0 not found  any task, Exec context    
+  @{fg shine}MarkAbsent@{fg text}           entries cleared         any task, Exec context    
+  @{fg shine}UnregisterPartition@{fg text}  1 cleared, 0 no-op      any task, Exec context    
 
 Notes a consumer needs:
 
@@ -674,6 +677,11 @@ Notes a consumer needs:
     pointer, @{fg shine}0@{fg text} for none. @{fg shine}nodeDosType@{fg text} (d5) records the DosType the handler mounted
     with into @{fg shine}pe_NodeDosType@{fg text} , @{fg shine}0@{fg text} meaning unknown. Register inputs cannot be gated
     by a declared size the way @{fg shine}mc_@{fg text} fields are, so a future input means a new LVO.
+  * @{fg shine}UnregisterPartition@{fg text} is the inverse, for a handler whose @{fg shine}ACTION_DIE@{fg text} was
+    accepted outside a ptable teardown: the entry returns to published-only and
+    the partition is the automount's again; an extra-mount row is unlinked and
+    freed. Only the registrant may clear its own entry ( @{fg shine}devNode@{fg text} must match). Like
+    @{fg shine}MarkAbsent@{fg text} it only attempts the lock, and skips when a teardown holds it.
   * @{fg shine}cfg@{fg text} is a @{fg shine}MountCfg@{fg text} (or @{fg shine}0@{fg text} for cold-boot defaults): global @{fg shine}mc_Flags@{fg text} and
     @{fg shine}mc_Control@{fg text} plus a 0-terminated per-dostype override table, resolved by
     @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} , and @{fg shine}mc_NodeDosType@{fg text} / @{fg shine}mc_NodeHandler@{fg text} . The override
@@ -701,7 +709,7 @@ Notes a consumer needs:
 @{b}@{fg shine}partition.resource@{fg text} layout.@{ub} Readers walk @{fg shine}ptr_PartList@{fg text} under @{fg shine}Forbid()@{fg text} or
 take @{fg shine}ptr_Lock@{fg text} . @{fg shine}OpenResource@{fg text} cannot negotiate versions, so the only
 runtime layout signal is the pair of stamps in the header, @{fg shine}ptr_Layout@{fg text}
-(currently @{fg shine}PTR_LAYOUT_V = 3@{fg text} ) and @{fg shine}ptr_EntrySize@{fg text} , plus @{fg shine}pe_Length@{fg text} per
+(currently @{fg shine}PTR_LAYOUT_V = 5@{fg text} ) and @{fg shine}ptr_EntrySize@{fg text} , plus @{fg shine}pe_Length@{fg text} per
 entry. Fields are appended only, never inserted, because @{fg shine}lsptres@{fg text} and
 fat95 ship separately-built offset mirrors; a consumer that needs a
 newer field checks the stamp and degrades if it is older. The full field

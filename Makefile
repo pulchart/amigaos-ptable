@@ -1,5 +1,5 @@
-VERSION = 20260827-dev
-DATE = 27.08.2026
+VERSION = 20260904-dev
+DATE = 04.09.2026
 
 PLIB_MAJOR = 2
 PLIB_MINOR = 0
@@ -136,7 +136,9 @@ dist/docs/ptable.guide: docs/ptable.md
 readme: $(README_NAME)
 
 # Generate the Aminet .readme from the template: resolve @VERSION@/@DATE@,
-# the components list, and a checksum block over every shipped artifact.
+# the components list, and a checksum block over every shipped artifact. Each
+# flavour is named by its archive-relative path (see the release: staging below),
+# so the four ptable.library builds never share a line.
 $(README_NAME): $(README_TEMPLATE) $(TARGETS) dist/c/lsptres
 	@echo "Generating $(README_NAME) from template..."
 	@checksums=""; \
@@ -144,7 +146,7 @@ $(README_NAME): $(README_TEMPLATE) $(TARGETS) dist/c/lsptres
 		t="dist/$$f/ptable.library"; \
 		[ -f "$$t" ] || continue; \
 		sz=$$(stat -c%s "$$t"); \
-		checksums="$$checksums""ptable.library $(PLIB_VERSION) ($(PLIB_DATE)) [$$f] ($$sz bytes):\n  MD5:    $$(md5sum "$$t" | cut -d' ' -f1)\n  SHA256: $$(sha256sum "$$t" | cut -d' ' -f1)\n\n"; \
+		checksums="$$checksums""$$f/libs/ptable.library $(PLIB_VERSION) ($(PLIB_DATE)) ($$sz bytes):\n  MD5:    $$(md5sum "$$t" | cut -d' ' -f1)\n  SHA256: $$(sha256sum "$$t" | cut -d' ' -f1)\n\n"; \
 	done; \
 	if [ -f dist/c/lsptres ]; then \
 		sz=$$(stat -c%s dist/c/lsptres); \

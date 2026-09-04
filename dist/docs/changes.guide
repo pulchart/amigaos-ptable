@@ -10,7 +10,7 @@
 
 @{b}ptable.library release notes@{ub}
 
-    @{"20260827-dev" link 20260827_dev}
+    @{"20260904-dev" link 20260904_dev}
     @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
 
 @endnode
@@ -19,35 +19,36 @@
 @{b}Index@{ub}
 
   @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
-  @{"20260827-dev" link 20260827_dev}
+  @{"20260904-dev" link 20260904_dev}
 
 @endnode
 
-@node 20260827_dev "20260827-dev"
-@{b}20260827-dev@{ub}
+@node 20260904_dev "20260904-dev"
+@{b}20260904-dev@{ub}
 
 @{i}Components in this release@{ui}:
 
   * @{fg shine}ptable.library 2.0-dev (27.08.2026)@{fg text} @{i}(new)@{ui}
   * @{fg shine}lsptres 1.0-dev (27.08.2026)@{fg text} @{i}(new)@{ui}
 
-@{b}Partition Table library@{ub}
+@{b}New major version of ptable.library 2.0@{ub}
 
-  * @{b}Unified partition scanning.@{ub} One scanner parses RDB, MBR, GPT, and flat
-    (whole-disk FAT) partition tables and publishes every partition into a shared
-    @{fg shine}partition.resource@{fg text} , now consumed by both @{fg shine}compactflash.device@{fg text} and @{fg shine}fat95@{fg text}
-    instead of each carrying its own parser. See @{"  ptable.guide  " link "ptable.guide/Main"} .
+  * @{b}Unified partition scanning.@{ub} One scanner parses RDB, MBR, GPT and flat
+    (whole-disk FAT) tables and publishes every partition into @{fg shine}partition.resource@{fg text}
+    , the shared partition manager. Any driver or handler reads the layout from
+    there instead of parsing the card itself; @{fg shine}compactflash.device@{fg text} and @{fg shine}fat95@{fg text} do
+    today. See @{"  ptable.guide  " link "ptable.guide/Main"} .
   * @{b}Selectable filesystem for MBR/GPT FAT partitions.@{ub} The consumer can name the
     DosType to mount them with ( @{fg shine}mc_NodeDosType@{fg text} ) and a handler to load when
     @{fg shine}FileSystem.resource@{fg text} has none ( @{fg shine}mc_NodeHandler@{fg text} ). Unset means unchanged; RDB
-    partitions are unaffected. See @{"  ptable.guide  " link "ptable.guide/Main"} .
+    partitions are unaffected.
   * @{b}@{fg shine}lsptres@{fg text}@{ub} shows the DosType a mounted partition actually carries in its @{fg shine}DosType@{fg text}
     column. A handler that mounts statically can record its DosType too, via a new
     @{fg shine}RegisterPartition@{fg text} input.
 
-@{b}Tools@{ub}
+@{b}New tool 'lsptres 1.0'@{ub}
 
-  * @{b}@{fg shine}lsptres@{fg text}@{ub}: a new CLI that lists the contents of @{fg shine}partition.resource@{fg text}. See @{"  lsptres.guide  " link "lsptres.guide/Main"}.
+  * Lists the contents of @{fg shine}partition.resource@{fg text}. See @{"  lsptres.guide  " link "lsptres.guide/Main"}.
 
 ----------------------------------------
 @{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 1_1__07_06_2026_}
@@ -56,6 +57,9 @@
 
 @node 1_1__07_06_2026_ "1.1 (07.06.2026)"
 @{b}1.1 (07.06.2026)@{ub}
+
+Never released on its own: 1.1 shipped inside the compactflash.device
+archive (driver/media/cfd), in releases 20260609 and 20260614.
 
 @{b}Partition Table library@{ub}
 
@@ -73,6 +77,6 @@
     under their own name instead of @{fg shine}ptable.library@{fg text} .
 
 ----------------------------------------
-@{"<< Prev" link 20260827_dev}  @{"Contents" link Main}
+@{"<< Prev" link 20260904_dev}  @{"Contents" link Main}
 
 @endnode
