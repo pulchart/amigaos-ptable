@@ -1,4 +1,4 @@
-## 20260827-dev
+## 20260904-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
@@ -7,17 +7,19 @@ _Components in this release_:
 - `lsptres 1.0-dev (27.08.2026)` _(new)_
 <!-- COMPONENTS:END -->
 
-##### Partition Table library
+#### New major version of ptable.library 2.0
 
-- **Unified partition scanning.** One scanner parses RDB, MBR, GPT, and flat (whole-disk FAT) partition tables and publishes every partition into a shared `partition.resource`, now consumed by both `compactflash.device` and `fat95` instead of each carrying its own parser. See [ptable.md](ptable.md).
-- **Selectable filesystem for MBR/GPT FAT partitions.** The consumer can name the DosType to mount them with (`mc_NodeDosType`) and a handler to load when `FileSystem.resource` has none (`mc_NodeHandler`). Unset means unchanged; RDB partitions are unaffected. See [ptable.md](ptable.md).
+- **Unified partition scanning.** One scanner parses RDB, MBR, GPT and flat (whole-disk FAT) tables and publishes every partition into `partition.resource`, the shared partition manager. Any driver or handler reads the layout from there instead of parsing the card itself; `compactflash.device` and `fat95` do today. See [ptable.md](ptable.md).
+- **Selectable filesystem for MBR/GPT FAT partitions.** The consumer can name the DosType to mount them with (`mc_NodeDosType`) and a handler to load when `FileSystem.resource` has none (`mc_NodeHandler`). Unset means unchanged; RDB partitions are unaffected.
 - **`lsptres`** shows the DosType a mounted partition actually carries in its `DosType` column. A handler that mounts statically can record its DosType too, via a new `RegisterPartition` input.
 
-##### Tools
+#### New tool 'lsptres 1.0'
 
-- **`lsptres`**: a new CLI that lists the contents of `partition.resource`. See [lsptres.md](lsptres.md).
+- Lists the contents of `partition.resource`. See [lsptres.md](lsptres.md).
 
 ## 1.1 (07.06.2026)
+
+Never released on its own: 1.1 shipped inside the compactflash.device archive (driver/media/cfd), in releases 20260609 and 20260614.
 
 ##### Partition Table library
 

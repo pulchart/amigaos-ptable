@@ -24,17 +24,17 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-ptable.library:
+New major version of ptable.library 2.0:
 
-* Unified partition scanning: one scanner parses RDB, MBR, GPT, and flat
-  (whole-disk FAT) partition tables and publishes every partition into a
-  shared partition.resource, now consumed by both compactflash.device and
-  fat95 instead of each carrying its own parser. See docs/ptable.guide.
+* Unified partition scanning: one scanner parses RDB, MBR, GPT and flat
+  (whole-disk FAT) tables and publishes every partition into
+  partition.resource, the shared partition manager. Any driver or
+  handler reads the layout from there instead of parsing the card
+  itself; compactflash.device and fat95 do today. See docs/ptable.guide.
 
-lsptres:
+New tool 'lsptres 1.0':
 
-* New CLI that lists the contents of partition.resource. See
-  docs/lsptres.guide.
+* Lists the contents of partition.resource. See docs/lsptres.guide.
 
 WHAT IT DOES
 ============
