@@ -437,9 +437,7 @@ _acd_reg:
 	move.b	#1,BC_HaveNodes(a4)
 	addq.b	#1,BC_PartCount(a4)
 	addq.l	#1,d7
-	ifd	DEBUG
-	bra.s	_acd_next		;skip the NOMOUNT trace below
-	endc
+	bra.s	_acd_next		;registered blob belongs to the live node
 _acd_addfail:
 ;-- expansion could not link the node: free the blob, keep the entry published
 	move.l	d6,a1
