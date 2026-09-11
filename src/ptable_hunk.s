@@ -51,6 +51,7 @@ HUNK_RELOC_TARGET macro
 HUNK_APPLY_RELOC macro
 	move.l	-8(a0),d3
 	sub.l	#12,d3
+	bcs.w	_brh_teardown		;empty hunk cannot hold a longword
 	cmp.l	d3,d0
 	bhi.w	_brh_teardown
 	move.l	a1,d1
@@ -141,11 +142,11 @@ _brh_attr_fast:
 	or.l	#MEMF_FAST,d1
 _brh_attr_done:
 	and.l	#$3FFFFFFF,d6
+	cmp.l	#$3FFFE,d6		;cap size*4+8 at 1 MiB before scaling
+	bhi.w	_brh_teardown
 	move.l	d6,d0
 	lsl.l	#2,d0
 	addq.l	#8,d0
-	cmp.l	#$100000,d0		;sanity: cap 1 MiB / hunk
-	bhi.w	_brh_teardown
 	move.l	BC_ExecBase(a4),a6
 	jsr	AllocMem(a6)
 	tst.l	d0
