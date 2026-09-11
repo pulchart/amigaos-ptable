@@ -831,13 +831,7 @@ _spg_chkmnt:
 	bset	#PEB_INVALID,pe_Flags(a3)	;card in, slot not on it -> invalid
 	bra.s	_spg_next		;keep (live node+blob)
 _spg_free:
-	move.l	a5,a6
-	jsr	Forbid(a6)
-	move.l	a3,a1
-	jsr	Remove(a6)
-	jsr	Permit(a6)
-	move.l	a3,a0
-	bsr	_psFreeEntry
+	bsr	_psUnlinkFreeEntry
 _spg_next:
 	move.l	d2,a3
 	bra.s	_spg_walk
