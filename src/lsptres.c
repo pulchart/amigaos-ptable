@@ -289,12 +289,22 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                flags_str(pe),
                (unsigned long)pe->pe_MountFlags,
                ctrl_str(pe));
-        if (verbose)
-            printf(" %-5s %10lu %11lu %5luM",
+        if (verbose) {
+            /* MiB, falling back to kiB below one: an 880K DD floppy used
+             * to read as 0M. Both units are binary, a block being 512 bytes,
+             * and kiB only appears under 1024 so the field stays five wide. */
+            unsigned long size = (unsigned long)(pe->pe_BlockCount / 2048);
+            char unit = 'M';
+            if (size == 0) {
+                size = (unsigned long)(pe->pe_BlockCount / 2);
+                unit = 'K';
+            }
+            printf(" %-5s %10lu %11lu %5lu%c",
                    cmd_name(pe->pe_ReadMode),
                    (unsigned long)pe->pe_StartLBA,
                    (unsigned long)pe->pe_BlockCount,
-                   (unsigned long)(pe->pe_BlockCount / 2048));
+                   size, unit);
+        }
         printf("\r\n");
     }
 }
