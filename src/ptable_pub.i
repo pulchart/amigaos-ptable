@@ -1,89 +1,66 @@
 ; ptable.library v2 - public interface
 ;
-; One pipeline: every partition scheme (RDB, MBR, GPT, superfloppy "flat")
-; is parsed by this library and PUBLISHED into partition.resource; the act
-; stages (cold register, runtime mount/unmount) consume only the resource.
-; Include in the library itself and in any consumer (device cold stub,
-; mount worker). fat95 and lsptres mirror the PartEntry offsets below.
+; Scans RDB, MBR, GPT and whole-disk FAT into partition.resource. Cold
+; registration and runtime mount/unmount consume these published entries.
+; Shared by library and consumers; fat95/lsptres maintain offset mirrors.
+;
+; Calls: a6 = library base; deviceName = NUL-terminated C string.
+; Preserve d2-d7/a2-a6; d0 is the result, d1/a0-a1 are scratch.
+; Call from task context, never an interrupt; Mount/Unmount require a Process.
+; Count results may be partial; zero also covers failure, with no error code.
 
-;--- LVOs (Exec convention: Open/Close/Expunge/Reserved = -6..-24) ---------
+;--- LVOs (Open/Close/Expunge/Reserved = -6..-24) --------------------------
 ;
-; BootScanPartitions(deviceName: a1, unit: d0) -> d0 = partitions registered
-;   Cold stage; call from an RTF_COLDSTART context (pre-DOS, single task).
-;   Scans the device, publishes every partition into partition.resource,
-;   loads RDB-carried filesystems into FileSystem.resource, then registers
-;   each mountable RDB entry: bootable via AddBootNode, the rest via
-;   AddDosNode(flags=0); MBR/GPT/flat entries stay published for a DOS-time
-;   consumer. System-Startup starts the handlers (steps 3-8).
-;   Adds the synthetic ConfigDev (boot menu) when anything was registered.
+; BootScanPartitions(deviceName:a1, unit:d0) -> d0 = registered count
+;   RTF_COLDSTART, pre-DOS only. Publish all schemes, load RDB filesystems into
+;   FileSystem.resource, register mountable RDB entries via AddBootNode
+;   (bootable) or AddDosNode(flags=0). MBR/GPT/flat await runtime mounting.
+;   Add a synthetic ConfigDev when nodes exist; System-Startup starts handlers.
 ;
-; ScanPartitions(deviceName: a1, unit: d0)   -> d0 = partitions newly published
-;   Publish only, no mounting. Exec-only; callable from any task context.
+; ScanPartitions(deviceName:a1, unit:d0) -> d0 = newly published count
+;   Exec-only. Scan and publish; never mount. May wait for PTR_Lock/device I/O.
 ;
-; MountPartitions(deviceName: a1, unit: d0, cfg: a0)  -> d0 = partitions mounted
-;   Runtime act; CALL FROM A PROCESS. AddDosNode(ADNF_STARTPROC) every
-;   entry that is !MOUNTED !NOMOUNT for the device+unit. cfg (a MountCfg, or 0
-;   for cold-boot defaults) supplies the global Flags + CONTROL and per-dostype
-;   overrides; each entry resolves its Flags+Control by pe_DosType, the node gets
-;   fssm_Flags + de_Control stamped, and the resolved values are recorded in
-;   pe_MountFlags / pe_Control. mc_NodeDosType / mc_NodeHandler choose the
-;   filesystem for a synthesized-envec partition; the DosType the node ends up
-;   with is recorded in pe_NodeDosType.
+; MountPartitions(deviceName:a1, unit:d0, cfg:a0) -> d0 = mounted count
+;   Process only. Start eligible unmounted entries via AddDosNode(ADNF_STARTPROC).
+;   cfg = MountCfg or 0 for defaults. Resolve Flags/CONTROL by pe_DosType;
+;   record results in pe_MountFlags/pe_Control and the node's fssm_Flags/de_Control.
+;   mc_NodeDosType/mc_NodeHandler select the handler for synthesized FAT entries;
+;   pe_NodeDosType records the node's resolved DosType. RDB geometry is retained.
 ;
-; UnmountPartitions(deviceName: a1, unit: d0, prefixList: a0) -> d0 = torn down
-;   Runtime teardown; CALL FROM A PROCESS. prefixList = 0: ACTION_DIE +
-;   RemDosEntry + free every mounted entry for the device+unit (published-only
-;   records are dropped). prefixList != 0 (0-terminated longwords of dostype
-;   high 3 bytes, e.g. $50465300 'PFS'): tear down only entries whose
-;   pe_DosType matches; every other matched entry is marked absent
-;   (PEB_PRESENT cleared, handler kept).
-;   Static-mount exemption: an entry whose DOS node this library did not
-;   build (pe_BlobPtr = 0, i.e. a hand-mounted DOSDriver claimed via
-;   RegisterPartition or adopted by the mount-time name reuse) AND whose
-;   PEB_KEEPSTATIC bit is set is exempt from both modes: not torn down,
-;   only marked absent; removing the user's node is then the user's call.
-;   The bit is stamped by MountPartitions from mc_UnmFlags, so the policy
-;   lives in the resource and lsptres shows it (S vs s in its flag
-;   picture); a policy change takes effect on the next mount pass.
+; UnmountPartitions(deviceName:a1, unit:d0, prefixList:a0) -> d0 = teardown count
+;   Process only. Drop unmounted records for this device/unit. For mounted
+;   entries, request ACTION_DIE, then remove/free only after confirmed teardown.
+;   prefixList = 0 selects all; otherwise a zero-terminated ULONG array selects
+;   pe_DosType high-three-byte prefixes (e.g. $50465300 for PFS).
+;   Unselected or retained handlers stay mounted and are marked absent.
+;   Static nodes (pe_BlobPtr=0: hand-mounted or adopted) with PEB_KEEPSTATIC
+;   are only marked absent in either mode; the caller owns their removal.
+;   MountPartitions stamps this policy from mc_UnmFlags on each mount pass;
+;   lsptres displays it as S/s.
 
 ;--- MountCfg (-> MountPartitions in a0; 0 = cold-boot defaults) -----------
 ;
-; Global Flags + CONTROL plus a per-dostype override table. ptable resolves
-; each entry by (pe_DosType & $FFFFFF00) against the overrides, falling back to
-; the global value. Strings are NUL-terminated C strings owned by the caller
-; for the duration of the call (ptable copies what it retains).
-;
-; mc_NodeDosType / mc_NodeHandler let the caller decide which filesystem serves
-; a partition this library synthesized an envec for, i.e. one that came from an
-; MBR, GPT or flat (whole-disk FAT) card rather than from an RDB. They apply to
-; FAT-family entries only; an RDB entry keeps the DosType and the geometry
-; recorded on the card.
+; Resolve overrides by pe_DosType & $FFFFFF00, falling back to global values.
+; Caller owns the structure, table and C strings through the call; retained
+; strings are copied. mc_NodeDosType/mc_NodeHandler apply only to synthesized
+; MBR/GPT/flat FAT entries; RDB retains its on-disk DosType and geometry.
 ;
 mc_Flags	= 0			;ULONG global fssm_Flags
 mc_Control	= 4			;APTR  global CONTROL C-string (0 = none)
 mc_Overrides	= 8			;APTR  override table (0 = none)
-mc_NodeDosType	= 12			;ULONG DosType to stamp on the node instead of
-					;the one the scan chose. Naming one also fixes
-					;the node's window to that partition's own block
-					;range: a handler told to use a specific DosType
-					;is not one auto-detecting its own partition.
-					;0 = leave the envec exactly as scanned.
-mc_NodeHandler	= 16			;APTR  handler path C-string, e.g. "L:Something",
-					;used ONLY when no FileSysEntry matches the
-					;node's DosType. 0 = FileSystem.resource only.
-mc_Size		= 20			;ULONG the caller's mc_Sizeof. MountCfg's
-					;de_TableSize: a field appended in a later
-					;release is read only when the caller's
-					;declared size covers it, so the struct grows
-					;by appending a field and bumping mc_Sizeof.
-					;The 2.0 fields above are baseline and are
-					;always read.
-mc_UnmFlags	= 24			;ULONG policy bits (MCUF_*), read only when
-					;mc_Size >= 28. MountPartitions stamps them
-					;into the PEB_ policy bits on every entry it
-					;walks for the device+unit, so the policy
-					;becomes resource state that UnmountPartitions,
-					;handlers and lsptres all read.
+mc_NodeDosType	= 12			;ULONG override node DosType; 0 = scanned envec
+					;nonzero also restricts its window to this
+					;partition's blocks (no handler auto-detection)
+mc_NodeHandler	= 16			;APTR handler C-string, e.g. "L:Something"
+					;fallback only if no FileSysEntry matches;
+					;0 = FileSystem.resource only
+mc_Size		= 20			;ULONG caller's structure size in bytes
+					;baseline fields above are always read;
+					;appended fields require sufficient size
+mc_UnmFlags	= 24			;ULONG MCUF_* bits; read only if mc_Size >= 28
+					;mount pass stamps entry policy, including
+					;already-mounted entries; older cfg leaves it
+					;unchanged
 mc_Sizeof	= 28
 
 MCUF_KEEPSTATIC	= 0			;keep static mounts on card removal
@@ -101,9 +78,8 @@ ovr_HasFlags	= 8			;UBYTE 1 = FLAGS_<fs> present (else use global)
 ovr_Control	= 12			;APTR  override CONTROL C-string (0 = use global)
 ovr_Sizeof	= 16
 ;
-; Keep ovr_Sizeof as it is. The library strides this table with its OWN idea of
-; the row size, so growing the row desynchronises a caller built against a
-; different header. New settings go in the mc_ block above, behind mc_Size.
+; ovr_Sizeof is fixed across versions: changing it breaks table traversal.
+; Append new settings to MountCfg, gated by mc_Size.
 
 _LVOBootScanPartitions	= -30
 _LVOScanPartitions	= -36
@@ -113,46 +89,31 @@ _LVORegisterPartition	= -54
 _LVOMarkAbsent		= -60
 _LVOUnregisterPartition	= -66
 ;
-; RegisterPartition(deviceName: a1, unit: d0, startLBA: d1, blockCount: d2,
-;               nameBSTR: a0, devNode: a2, flags: d3, control: d4,
-;               nodeDosType: d5)                  -> d0 = 1 updated / 0 not found
-;   Overlay a real mount onto an already-published entry: a handler that
-;   serves a volume calls this so the resource shows the volume's real DOS
-;   name (dn_Name) and MOUNTED state instead of the synthesized scan name.
-;   nodeDosType is the DosType the handler mounted with (-> pe_NodeDosType,
-;   0 = unknown). Register inputs cannot be gated by a declared size the way
-;   mc_ fields are, so a future input here means a new LVO.
-;   flags + control (d4 = APTR to a BSTR, 0 = none) are the values the handler
-;   actually opened the device with; they are recorded in pe_MountFlags /
-;   pe_Control so lsptres reflects the live mount on every path (including the
-;   persistent device-dostype handler). Matches by device+unit+startLBA.
-;   An entry MOUNTED by a different node is never overlaid (that would
-;   desynchronise the pe_DevNode/pe_BlobPtr teardown pairing); the
-;   registration is recorded as an extra-mount row instead: a PEB_SHADOW
-;   clone of the entry carrying the second handler's name and node, so the
-;   resource lists every mount (CF0>CFAUX and CF0>CFA0 as two rows).
-;   Re-registering an entry's own node (rebind) refreshes that entry,
-;   shadow rows included. Exec-only.
+; RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
+;   nameBSTR:a0, devNode:a2, flags:d3, control:d4, nodeDosType:d5) -> d0 = 1/0
+;   Exec-only; may wait for PTR_Lock. Match a published device/unit/startLBA;
+;   blockCount is currently unused (filesystem and partition sizes may differ).
+;   Record MOUNTED, devNode, flags and nodeDosType (0 = unknown), and copy name
+;   and CONTROL into pe_MountName/pe_Control, truncated to 31 characters.
+;   nameBSTR/control are byte pointers to BSTRs, not BPTRs; control may be 0.
+;   Strings need only survive the call; devNode must remain valid while mounted.
+;   Return 1 for registration/rebind; 0 for no match or allocation failure.
+;   Rebind the caller's existing row, including a shadow. If another node owns
+;   the primary row, clone a PEB_SHADOW row instead of replacing its owner.
+;   New register inputs require a new LVO; this call has no size negotiation.
 ;
-; UnregisterPartition(deviceName: a1, unit: d0, startLBA: d1, devNode: a2)
-;                                                  -> d0 = 1 cleared / 0 no-op
-;   Inverse of RegisterPartition, for a handler that leaves voluntarily
-;   (its ACTION_DIE was accepted outside a ptable teardown): clears
-;   PEB_MOUNTED/pe_DevNode/pe_MountName and the recorded mount values, so
-;   the entry returns to published-only and the partition is the
-;   automount's again; a PEB_SHADOW extra-mount row is unlinked and freed
-;   instead. Only the entry's own registrant may clear it (pe_DevNode
-;   must equal devNode). Attempts PTR_Lock like MarkAbsent and skips when
-;   it is busy: a ptable teardown then owns the entry and frees it
-;   itself. Exec-only.
+; UnregisterPartition(deviceName:a1, unit:d0, startLBA:d1, devNode:a2)
+;   -> d0 = 1 cleared, 0 no match/null node/busy lock/allocation failure
+;   Exec-only, best-effort PTR_Lock. Only the matching node can unregister.
+;   Clear MOUNTED/INVALID, node/name and recorded mount values; retain scan data.
+;   A shadow row is freed instead. Does not stop the handler or remove its DOS
+;   node; use when the handler leaves voluntarily outside a ptable teardown.
 ;
-; MarkAbsent(deviceName: a1, unit: d0)            -> d0 = count cleared
-;   Card removed: clear PEB_PRESENT on every entry for device+unit, keeping
-;   PEB_MOUNTED, pe_DevNode, the DOS node and the handler in memory (native
-;   removable-media model). The handler ejects its volume via the device's
-;   disk-change notify; a later ScanPartitions re-sets PEB_PRESENT on
-;   reinsert. The keep-everything detach path; UnmountPartitions with a
-;   prefixList is the selective-teardown alternative. Exec-only.
+; MarkAbsent(deviceName:a1, unit:d0) -> d0 = matching entries processed
+;   Exec-only, best-effort PTR_Lock; return 0 if unavailable. Clear PRESENT and
+;   INVALID, retaining mount/node/handler state. Count includes already-absent
+;   entries. Device notification ejects the handler's volume; a later scan
+;   restores PRESENT. Use UnmountPartitions for selective handler teardown.
 
 ;--- partition.resource ----------------------------------------------------
 ;
@@ -165,9 +126,10 @@ _LVOUnregisterPartition	= -66
 ;  96      ptr_EntrySize UWORD pe_Sizeof the publisher was built with
 ;  98      ptr_Sizeof
 ;
-; Writers (every LVO; MarkAbsent only attempts the lock and skips when it is
-; busy) hold ptr_Lock for their whole run. Read-only
-; consumers walk ptr_PartList under Forbid() or take ptr_Lock themselves.
+; LVOs serialize resource access with PTR_Lock. MarkAbsent and
+; UnregisterPartition only attempt the lock and skip when busy. Readers may
+; protect a list walk with Forbid() or take PTR_Lock for a coherent snapshot.
+; Do not retain entry/string pointers after releasing protection.
 ;
 ; ABI GROWTH CONTRACT (applies to this header AND PartEntry):
 ;   - new fields are APPENDED only; inserting mid-struct is forbidden
@@ -221,14 +183,10 @@ pe_Length	= 244			;UWORD allocated entry size, stamped = pe_Sizeof
 					;at publish; consumers bounds-check appended
 					;fields against it (see growth contract above)
 ;		  246..247		;(2 pad: keep pe_NodeDosType 4-aligned)
-pe_NodeDosType	= 248			;ULONG DosType actually stamped into the node's
-					;DosEnvec (layout 3). NOT pe_DosType: that stays
-					;the DETECTED filesystem, so the Flags/CONTROL/
-					;UNMOUNT prefix matching keeps working, while the
-					;node may be mounted as whatever DosType the
-					;caller asked for in mc_NodeDosType.
-					;Resolved per mount, or recorded by
-					;RegisterPartition; 0 until the entry is mounted.
+pe_NodeDosType	= 248			;ULONG mounted node DosType (layout 3), else 0
+					;resolved per mount or RegisterPartition;
+					;pe_DosType remains detected type for
+					;Flags/CONTROL/UNMOUNT prefix matching
 ;		  252..259		;reserved for appended fields (zeroed)
 pe_Sizeof	= 260
 
