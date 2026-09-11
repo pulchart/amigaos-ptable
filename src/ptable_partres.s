@@ -258,6 +258,19 @@ _psd_out:
 	rts
 
 ;===========================================================
+; _psUnlinkFreeEntry: Remove the PartEntry, then _psFreeEntry it.
+; In : a3 = PartEntry, a5 = ExecBase
+;===========================================================
+_psUnlinkFreeEntry:
+	move.l	a5,a6
+	jsr	Forbid(a6)
+	move.l	a3,a1
+	jsr	Remove(a6)
+	jsr	Permit(a6)
+	move.l	a3,a0
+	bra	_psFreeEntry
+
+;===========================================================
 ; _psFreeEntry: free pe_Device copy + the PartEntry node.
 ; (The DN blob, if any, is freed separately by the caller.)
 ; In : a0 = PartEntry, a5 = ExecBase

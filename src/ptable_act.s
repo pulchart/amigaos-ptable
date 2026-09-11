@@ -679,13 +679,7 @@ _aum_keep:
 	bclr	#PEB_PRESENT,pe_Flags(a3)	;handler kept, marked absent (---M)
 	bra.w	_aum_next
 _aum_drop:
-	move.l	a5,a6			;no handler -> unlink and free the entry
-	jsr	Forbid(a6)
-	move.l	a3,a1
-	jsr	Remove(a6)
-	jsr	Permit(a6)
-	move.l	a3,a0
-	bsr	_psFreeEntry
+	bsr	_psUnlinkFreeEntry		;no handler -> unlink and free the entry
 _aum_next:
 	move.l	d2,a3
 	bra.w	_aum_walk
@@ -776,13 +770,7 @@ _ate_nofree:
 	bsr	_bootDebugBStr
 	endc
 ;-- node + handler gone: unlink and free the PartEntry itself
-	move.l	a5,a6
-	jsr	Forbid(a6)
-	move.l	a3,a1
-	jsr	Remove(a6)
-	jsr	Permit(a6)
-	move.l	a3,a0
-	bsr	_psFreeEntry
+	bsr	_psUnlinkFreeEntry
 	moveq.l	#1,d0			;torn down + freed
 	rts
 
