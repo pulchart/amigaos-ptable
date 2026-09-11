@@ -34,6 +34,29 @@
 ;
 ; Clobbers: none visible to caller (movem saves d2-d7/a2-a6).
 ;===========================================================
+; Shared RELOC32/RELOC32SHORT checks; inline to retain code and stack behavior.
+; d7 = target hunk, d2 = first, d4 = count, a5 = table; a1 -> target data.
+HUNK_RELOC_TARGET macro
+	sub.l	d2,d7
+	bmi.w	_brh_teardown
+	cmp.l	d4,d7
+	bhs.w	_brh_teardown
+	move.l	d7,d0
+	lsl.l	#2,d0
+	move.l	(a5,d0.l),a1
+	addq.l	#8,a1
+	endm
+
+; d0 = offset, a0 -> destination data, a1 -> target data. Clobbers d1/d3.
+HUNK_APPLY_RELOC macro
+	move.l	-8(a0),d3
+	sub.l	#12,d3
+	cmp.l	d3,d0
+	bhi.w	_brh_teardown
+	move.l	a1,d1
+	add.l	d1,(a0,d0.l)
+	endm
+
 _bootRelocateHunks:
 	movem.l	d2-d7/a2-a6,-(sp)
 
@@ -251,14 +274,7 @@ _brh_reloc_outer:
 	cmpa.l	a3,a2
 	bhs.w	_brh_teardown
 	move.l	(a2)+,d7
-	sub.l	d2,d7
-	bmi.w	_brh_teardown
-	cmp.l	d4,d7
-	bhs.w	_brh_teardown
-	move.l	d7,d0
-	lsl.l	#2,d0
-	move.l	(a5,d0.l),a1
-	addq.l	#8,a1
+	HUNK_RELOC_TARGET
 _brh_reloc_inner:
 	cmpa.l	a3,a2
 	bhs.w	_brh_teardown
@@ -266,12 +282,7 @@ _brh_reloc_inner:
 	;-- bounds-check relocation offset against dst hunk's data area;
 	;   alloc size header is at -8(a0), data ends at alloc_size-8
 	;   bytes, max valid 4-byte write offset = alloc_size-12.
-	move.l	-8(a0),d3
-	sub.l	#12,d3
-	cmp.l	d3,d0
-	bhi.w	_brh_teardown
-	move.l	a1,d1
-	add.l	d1,(a0,d0.l)
+	HUNK_APPLY_RELOC
 	subq.l	#1,d6
 	bne.s	_brh_reloc_inner
 	bra.w	_brh_reloc_outer
@@ -295,25 +306,13 @@ _brh_rs_outer:
 	bhs.w	_brh_teardown
 	moveq.l	#0,d7
 	move.w	(a2)+,d7		;target hunk number (UWORD)
-	sub.l	d2,d7			;d2 = first_hunk
-	bmi.w	_brh_teardown
-	cmp.l	d4,d7			;d4 = hunk count
-	bhs.w	_brh_teardown
-	move.l	d7,d0
-	lsl.l	#2,d0
-	move.l	(a5,d0.l),a1
-	addq.l	#8,a1			;a1 = target hunk data base
+	HUNK_RELOC_TARGET
 _brh_rs_inner:
 	cmpa.l	a3,a2
 	bhs.w	_brh_teardown
 	moveq.l	#0,d0
 	move.w	(a2)+,d0		;offset (UWORD)
-	move.l	-8(a0),d3
-	sub.l	#12,d3
-	cmp.l	d3,d0
-	bhi.w	_brh_teardown
-	move.l	a1,d1
-	add.l	d1,(a0,d0.l)
+	HUNK_APPLY_RELOC
 	subq.l	#1,d6
 	bne.s	_brh_rs_inner
 	bra.s	_brh_rs_outer
