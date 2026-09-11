@@ -3,7 +3,7 @@ Uploader:     jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Author:       jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Type:         util/libs
 Version:      @VERSION@
-Requires:     AmigaOS 2.0+; a consumer such as compactflash.device or fat95; ROM-resident for cold-boot autoboot
+Requires:     AmigaOS 2.0+; a consumer such as compactflash.device or fat95
 Architecture: m68k-amigaos
 Kurz:         AmigaOS Partitionstabellen-Library (RDB/MBR/GPT)
 
