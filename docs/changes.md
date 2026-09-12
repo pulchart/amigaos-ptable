@@ -1,11 +1,21 @@
-## 20260911
+## 20260912-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
+- `ptable.library 2.0 (11.09.2026)`
+- `lsptres 1.0 (11.09.2026)`
+<!-- COMPONENTS:END -->
+
+TBD
+
+
+## 20260911
+
+_Components in this release_:
+
 - `ptable.library 2.0 (11.09.2026)` _(new)_
 - `lsptres 1.0 (11.09.2026)` _(new)_
-<!-- COMPONENTS:END -->
 
 #### New major version of ptable.library 2.0
 

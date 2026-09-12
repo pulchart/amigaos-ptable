@@ -10,6 +10,7 @@
 
 @{b}ptable.library release notes@{ub}
 
+    @{"20260912-dev" link 20260912_dev}
     @{"20260911" link 20260911}
     @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
 
@@ -20,6 +21,22 @@
 
   @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
   @{"20260911" link 20260911}
+  @{"20260912-dev" link 20260912_dev}
+
+@endnode
+
+@node 20260912_dev "20260912-dev"
+@{b}20260912-dev@{ub}
+
+@{i}Components in this release@{ui}:
+
+  * @{fg shine}ptable.library 2.0 (11.09.2026)@{fg text}
+  * @{fg shine}lsptres 1.0 (11.09.2026)@{fg text}
+
+TBD
+
+----------------------------------------
+@{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20260911}
 
 @endnode
 
@@ -51,7 +68,7 @@
   * Lists the contents of @{fg shine}partition.resource@{fg text}. See @{"  lsptres.guide  " link "lsptres.guide/Main"}.
 
 ----------------------------------------
-@{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 1_1__07_06_2026_}
+@{"<< Prev" link 20260912_dev}  @{"Contents" link Main}  @{"Next >>" link 1_1__07_06_2026_}
 
 @endnode
 
