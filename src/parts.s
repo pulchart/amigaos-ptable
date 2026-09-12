@@ -143,15 +143,32 @@ _psg_eloop:
 	bhs.w	_psg_done
 ;-- byte offset = idx * entrySize; 512-byte sectors -> block = base
 ;   + offset>>9, rem = offset & 511
-	move.l	d2,d0
+	;Overflow ends the scan: later offsets can only increase.
+	ifd	__68020__
+	move.l	d6,d0
+	mulu.l	d2,d0			;index * entrySize
+	bvs.w	_psg_done		;byte offset exceeds 32 bits
+	else
+	;Index < 100: both 16-bit partial products fit in 32 bits.
+	move.l	d6,d0
+	swap	d0
+	mulu.w	d2,d0			;index * entrySize high word
+	cmp.l	#$ffff,d0
+	bhi.w	_psg_done		;high product cannot fit its half
+	swap	d0
+	clr.w	d0
 	move.l	d6,d1
-	UMUL32				;d0 = idx * entrySize
+	mulu.w	d2,d1			;index * entrySize low word
+	add.l	d1,d0
+	bcs.w	_psg_done		;byte offset exceeds 32 bits
+	endif	;__68020__
 	move.l	d0,d3
 	andi.l	#$1ff,d3		;d3 = byte offset within block (kept
 					;     across the callback: preserved reg)
 	lsr.l	#8,d0
 	lsr.l	#1,d0			;d0 = offset / 512
 	add.l	d4,d0			;d0 = absolute LBA of the entry block
+	bcs.w	_psg_done		;do not read a wrapped LBA
 	jsr	(a3)
 	tst.l	d0
 	bne.w	_psg_done
@@ -184,7 +201,9 @@ _psg_match:
 	move.l	44(a1),d1		;Last LBA high
 	bne.s	_psg_enext
 	sub.l	d3,d0
+	bcs.s	_psg_enext		;last LBA precedes first
 	addq.l	#1,d0			;d0 = last - first + 1 = block count
+	bcs.s	_psg_enext		;2^32 blocks cannot fit PartRec
 	move.l	d7,d1
 	mulu.w	#PR_Sizeof,d1
 	lea	0(a2,d1.l),a0		;a0 = &PartRec[d7]
