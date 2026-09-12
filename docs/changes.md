@@ -1,11 +1,23 @@
-## 20260911
+## 20260923-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
+- `ptable.library 2.1-dev (23.09.2026)` _(new)_
+- `lsptres 1.0 (11.09.2026)`
+<!-- COMPONENTS:END -->
+
+#### 'ptable.library 2.1'
+
+- A damaged GPT no longer produces bogus partitions.
+
+
+## 20260911
+
+_Components in this release_:
+
 - `ptable.library 2.0 (11.09.2026)` _(new)_
 - `lsptres 1.0 (11.09.2026)` _(new)_
-<!-- COMPONENTS:END -->
 
 #### New major version of ptable.library 2.0
 

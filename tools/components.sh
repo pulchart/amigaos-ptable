@@ -38,8 +38,10 @@ for entry in "$@"; do
 	[ -n "$ov" ] || ov="$(old_val "${prefix}_MAJOR").$(old_val "${prefix}_MINOR")$(old_val "${prefix}_VERSION_SUFFIX")"
 	od=$(old_val "${prefix}_DATE")
 
+	# Without the previous release there is nothing to compare against, and a
+	# source export has no git history, so mark nothing rather than everything.
 	new=
-	{ [ -z "$prev" ] || [ "$ver ($date)" != "$ov ($od)" ]; } && new=1
+	[ -n "$prev" ] && [ -n "$oldmk" ] && [ "$ver ($date)" != "$ov ($od)" ] && new=1
 
 	if [ "$fmt" = md ]; then
 		line="- \`$name $ver ($date)\`${new:+ _(new)_}"

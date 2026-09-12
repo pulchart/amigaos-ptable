@@ -1,10 +1,10 @@
-VERSION = 20260911
-DATE = 11.09.2026
+VERSION = 20260923-dev
+DATE = 23.09.2026
 
 PLIB_MAJOR = 2
-PLIB_MINOR = 0
-PLIB_VERSION_SUFFIX =
-PLIB_DATE  = 11.09.2026
+PLIB_MINOR = 1
+PLIB_VERSION_SUFFIX = -dev
+PLIB_DATE  = 23.09.2026
 PLIB_VERSION = $(PLIB_MAJOR).$(PLIB_MINOR)$(PLIB_VERSION_SUFFIX)
 
 LSPTRES_MAJOR = 1
@@ -20,6 +20,12 @@ COMPONENT_ARGS = $(foreach c,$(COMPONENTS),'$(c)|$($(c)_NAME)|$($(c)_VERSION)|$(
 
 VASM_HOME ?= /opt/vasm
 VASM       = $(VASM_HOME)/bin/vasmm68k_mot
+
+# The test scripts assemble src/ themselves; PTABLE_VASM is how they are told
+# to use exactly the assembler this Makefile uses.
+PYTHON    ?= python3
+TESTDIR    = tests
+export PTABLE_VASM = $(VASM)
 
 VBCC_HOME ?= /opt/vbcc
 VBCC       = $(VBCC_HOME)/bin/vc
@@ -62,7 +68,7 @@ README_TEMPLATE = dist.readme.in
 
 COMPONENT_VERSIONS_NL = $(shell sh tools/components.sh plain $(COMPONENT_ARGS))
 
-.PHONY: all clean distclean lsptres guide guides version-readme readme release check-lha
+.PHONY: all clean distclean lsptres guide guides version-readme readme release check-lha test check-test-deps test-list-update
 all: $(TARGETS) dist/ptable.version dist/lsptres.version dist/c/lsptres
 
 # Rewrite the topmost release-notes header and the COMPONENTS block in
@@ -107,7 +113,7 @@ dist/lsptres.version: Makefile
 	$(Q)echo "$(LSPTRES_VERSION) $(LSPTRES_DATE)" > $@
 
 lsptres: dist/c/lsptres
-dist/c/lsptres: $(SRC)/lsptres.c
+dist/c/lsptres: $(SRC)/lsptres.c Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  VBCC    $@"
 	$(Q)VBCC=$(VBCC_HOME) PATH=$(VBCC_HOME)/bin:$$PATH $(VBCC) +aos68k -O2 -c99 -I$(NDK)/Include_H -DVERSION='"$(LSPTRES_VERSION)"' -DDATE='"$(LSPTRES_DATE)"' -o $@ $<
@@ -119,12 +125,12 @@ dist/docs/changes.guide: docs/changes.md
 	$(Q)echo "  GUIDE   $@"
 	$(Q)python3 $(MD2GUIDE) docs/changes.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library release notes" --ver-title "ptable.library release notes guide"
 
-dist/docs/lsptres.guide: docs/lsptres.md
+dist/docs/lsptres.guide: docs/lsptres.md Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  GUIDE   $@"
 	$(Q)python3 $(MD2GUIDE) docs/lsptres.md $@ --version $(LSPTRES_VERSION) --date $(LSPTRES_DATE) --title "lsptres" --ver-title "lsptres guide"
 
-dist/docs/ptable.guide: docs/ptable.md
+dist/docs/ptable.guide: docs/ptable.md Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  GUIDE   $@"
 	$(Q)python3 $(MD2GUIDE) docs/ptable.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library" --ver-title "ptable.library guide"
@@ -193,6 +199,34 @@ check-lha:
 		echo "Install with: sudo dnf install lha"; \
 		exit 1; \
 	}
+
+# ============================================================
+# Test targets
+# ============================================================
+# Emulated suite: vasm assembles src/, amitools/vamos runs the 68k code with
+# mocked Exec and resource calls. No Amiga and no device. See tests/README.md.
+# Each script sweeps both CPU tiers and both flavours itself.
+
+TEST_CHECKS = audit_cold_registration.py audit_hunk_bounds.py parts_walker.py \
+              unlink_paths.py unlink_free_entry.py
+
+# Gated on the dependency report: two providers of the amitools and machine68k
+# imports overwrite each other, and a suite that runs anyway passes or fails by
+# install order rather than by the code under test.
+test: check-test-deps
+	$(Q)for check in $(TEST_CHECKS); do \
+		echo "  TEST    $$check"; \
+		$(PYTHON) $(TESTDIR)/$$check || exit 1; \
+	done
+
+# Deliberately does not depend on the assembler being present: a missing
+# assembler is the thing this target exists to report.
+check-test-deps:
+	$(Q)$(PYTHON) $(TESTDIR)/deps.py
+
+test-list-update:
+	$(Q)$(PYTHON) $(TESTDIR)/list_tests.py --update
+	$(Q)echo "Updated: $(TESTDIR)/INVENTORY.md"
 
 clean:
 	$(Q)rm -rf dist $(VERSION_INC)
