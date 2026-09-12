@@ -3,19 +3,23 @@ Uploader:     jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Author:       jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Type:         util/libs
 Version:      @VERSION@
-Requires:     AmigaOS 2.0+; a consumer such as compactflash.device or fat95
+Requires:     AmigaOS 2.0+
 Architecture: m68k-amigaos
+Replaces:     util/libs/ptable.v20260911.lha
 Kurz:         AmigaOS Partitionstabellen-Library (RDB/MBR/GPT)
 
-ptable.library is the AmigaOS partition-table library: one place that parses
+ptable.library is the AmigaOS partition-table library (one place that parses
 RDB, MBR, GPT and flat layouts and publishes every partition into a shared
-partition.resource, so a device driver and a filesystem handler never each
+partition.resource) so a device driver and a filesystem handler never each
 carry their own partition parser.
 
-It was assembled from existing code: the library framework and RDB cold-boot
-path came from compactflash.device, the MBR/GPT scanning from fat95.
+It was assembled from existing code: the library framework and RDB
+cold-boot path came from compactflash.device (pre 2.0), the MBR/GPT
+scanning from fat95 (pre 4.0).
 
-Consumed by compactflash.device 2.0+ (driver/media/cfd) and fat95 4.0+ (disk/misc/fat95).
+Consumed by
+* compactflash.device 2.0+ (driver/media/cfd) and
+* fat95 4.0+ (disk/misc/fat95).
 
 COMPONENTS IN THIS RELEASE
 ==========================
@@ -24,17 +28,7 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-New major version of ptable.library 2.0:
-
-* Unified partition scanning: one scanner parses RDB, MBR, GPT and flat
-  (whole-disk FAT) tables and publishes every partition into
-  partition.resource, the shared partition manager. Any driver or
-  handler reads the layout from there instead of parsing the card
-  itself; compactflash.device and fat95 do today. See docs/ptable.guide.
-
-New tool 'lsptres 1.0':
-
-* Lists the contents of partition.resource. See docs/lsptres.guide.
+TBD
 
 WHAT IT DOES
 ============
