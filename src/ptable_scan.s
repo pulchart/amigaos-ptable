@@ -162,6 +162,7 @@ _srn_mbr:
 	lea	-(PART_MAX_REC*PR_Sizeof)(sp),sp		;PART_MAX_REC * PR_Sizeof
 	move.l	sp,a2			;a2 = PartRec buffer
 	move.l	BC_BlockBuf(a4),a0
+	lea	_psReadLBA(pc),a3	;EBR chain reader
 	bsr	_partScanMBR
 	moveq.l	#PES_MBR,d6
 	bra.s	_srn_pubrecs

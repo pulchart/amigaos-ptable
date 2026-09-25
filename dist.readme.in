@@ -29,6 +29,8 @@ WHAT'S NEW (@DATE@)
 =======================
 
 * A damaged GPT no longer produces bogus partitions.
+* MBR logical partitions inside an extended partition are found,
+  numbered from 4 (CF4, CF5, ...).
 
 WHAT IT DOES
 ============

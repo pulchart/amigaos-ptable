@@ -80,7 +80,7 @@ graph TD
 
 - **PREFIX:** a short device abbreviation from a built-in table, or, for devices not in the table, the device's base name with `.device` stripped and the `A-Z` and `0-9` characters uppercased. Currently only `compactflash.device` has an abbreviation (`CF`); everything else falls back to the base name.
 - **unit-letter:** lowercase `a` + unit (`a` = unit 0, `b` = unit 1, up to `p` = unit 15). Omitted on unit 0 of a device whose abbreviation-table entry is flagged single-unit; currently `compactflash.device`, so its names carry no letter.
-- **partition-number:** 0-based decimal.
+- **partition-number:** 0-based table index: MBR primary slots 0-3, logical partitions of the first extended partition 4 onwards, GPT entry number. Non-FAT and empty slots keep their number, so the first logical is always `CF4`. Indexes stop at 99, and a card publishes at most 12 MBR or GPT partitions.
 
 | Device | Unit | Synthesized names |
 |--------|------|-------------------|

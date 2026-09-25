@@ -46,6 +46,7 @@ def build(tmp, cpu, flavour):
 
 class Walker:
     """One run of a walker with the blocks a crafted table would make it read."""
+    CTX = 0x46000
 
     def __init__(self, image, eq, blocks=None):
         self.eq = eq
@@ -76,13 +77,15 @@ class Walker:
         self.cpu.w_reg(8, BLOCK)        # a0
         self.cpu.w_reg(0, 0)
 
-    def run(self, name, a0=0, context=0):
+    def run(self, name, a0=0, context=0, regs=()):
         for i in range(16):
             self.cpu.w_reg(i, 0)
         self.cpu.w_reg(8, a0)           # a0 = loaded block, MBR only
         self.cpu.w_reg(10, BUF)         # a2 = output buffer
         self.cpu.w_reg(11, CB)          # a3 = block reader
         self.cpu.w_reg(12, context)     # a4 = callback context
+        for reg, value in regs:
+            self.cpu.w_reg(reg, value)
         self.m.prepare(self.syms[name], STACK)
         state = self.m.execute(2000000)
         assert self.m.was_exit(state), '%s did not return' % name
@@ -109,7 +112,6 @@ class Walker:
 
 class Scanner(Walker):
     """Real scanner and parsers; mock geometry, reads, publishing and reconciliation."""
-    CTX = 0x46000
 
     def __init__(self, image, eq, blocks):
         super().__init__(image, eq, blocks)
@@ -193,6 +195,42 @@ def scanner_cases(image, eq, check):
                   (len(expected), expected, ['clear', 'purge']))
         finally:
             w.close()
+
+    # A primary failing the boot gate does not stop the logicals behind it.
+    blocks = {0: mbr([(0, 0x06, 100, 8), (0, 0x0c, 200, 8), (0, 0x0f, 1000, 100)]),
+              100: fat_boot(), 1000: ebr((0, 0x0c, 10, 8)), 1010: fat_boot()}
+    w = Scanner(image, eq, blocks)
+    try:
+        n = w.run('_scanRun', context=w.CTX)
+        check('scan MBR logical published', (n, w.published),
+              (2, [(eq['PES_MBR'], 100, 8), (eq['PES_MBR'], 1010, 8)]))
+    finally:
+        w.close()
+
+    # _scanFillRec names the entry by its table index: the first logical is CF4.
+    entry, name = 0x48000, 0x47000
+    w = Walker(image, eq)
+    try:
+        w.mem.w_block(name, b'compactflash.device\0')
+        w.mem.w32(w.CTX + eq['BC_DevName'], name)
+        w.mem.w32(w.CTX + eq['BC_Unit'], 0)
+        w.mem.w_block(entry, bytes(eq['pe_Sizeof']))
+        w.mem.w_block(BUF, struct.pack('>IIIBB', 1010, 8, eq['DOSTYPE_FAT'], 4,
+                                       1 << eq['PRFB_PRESENT']))
+        w.run('_scanFillRec', context=w.CTX,
+              regs=((6, eq['PES_MBR']), (11, entry)))
+        nb = entry + eq['pe_NameB']
+        check('fill names MBR logical by index',
+              (bytes(w.mem.r_block(nb + 1, w.mem.r8(nb))),
+               w.mem.r32(entry + eq['pe_PartIndex'])), (b'CF4', 4))
+    finally:
+        w.close()
+
+
+def ebr(logical, link=None):
+    """An EBR: entry 0 = logical (start relative to this EBR), entry 1 = link
+    (start relative to the extended partition)."""
+    return mbr([logical, link or (0, 0, 0, 0)])
 
 
 def mbr(slots):
@@ -284,6 +322,85 @@ def run_suite(cpu, flavour):
                                   (0, 0x0c, 7, 7)]))
         n = w.run('_partScanMBR', a0=BLOCK)
         check('mbr slot index survives a gap', [r['index'] for r in w.records(n)], [1, 3])
+        w.close()
+
+        # --- MBR extended / logical ------------------------------------
+        def logicals(label, blocks, want, reads=None):
+            w = Walker(image, eq, blocks)
+            w.mem.w_block(BLOCK, blocks[0])
+            n = w.run('_partScanMBR', a0=BLOCK)
+            got = [(r['start'], r['blocks'], r['index']) for r in w.records(n)]
+            if reads is None:
+                check('mbr ' + label, got, want)
+            else:
+                check('mbr ' + label, (got, w.reads), (want, reads))
+            w.close()
+
+        for kind in (0x05, 0x0f, 0x85):
+            logicals('extended type %02x followed' % kind,
+                     {0: mbr([(0, 0x0c, 100, 8), (0, kind, 1000, 500)]),
+                      1000: ebr((0, 0x0c, 10, 20), (0, 0x05, 100, 50)),
+                      1100: ebr((0, 0x06, 10, 30))},
+                     [(100, 8, 0), (1010, 20, 4), (1110, 30, 5)], [1000, 1100])
+        logicals('non-FAT logical skipped but indexed',
+                 {0: mbr([(0, 0x0f, 1000, 500)]),
+                  1000: ebr((0, 0x07, 10, 20), (0, 0x05, 100, 50)),
+                  1100: ebr((0, 0x0c, 10, 30))},
+                 [(1110, 30, 5)])
+        logicals('empty EBR entry takes no index',
+                 {0: mbr([(0, 0x0f, 1000, 500)]),
+                  1000: ebr((0, 0, 0, 0), (0, 0x05, 100, 50)),
+                  1100: ebr((0, 0x0c, 10, 30))},
+                 [(1110, 30, 4)])
+        logicals('only the first extended slot followed',
+                 {0: mbr([(0, 0x0f, 1000, 500), (0, 0x05, 2000, 500)]),
+                  1000: ebr((0, 0x0c, 10, 20)), 2000: ebr((0, 0x0c, 10, 20))},
+                 [(1010, 20, 4)], [1000])
+        logicals('zero-size extended slot ignored',
+                 {0: mbr([(0, 0x0f, 1000, 0)]), 1000: ebr((0, 0x0c, 10, 20))},
+                 [], [])
+        logicals('EBR link cycle stops',
+                 {0: mbr([(0, 0x0f, 1000, 500)]),
+                  1000: ebr((0, 0x0c, 10, 20), (0, 0x05, 100, 50)),
+                  1100: ebr((0, 0x0c, 10, 30), (0, 0x05, 100, 50))},
+                 [(1010, 20, 4), (1110, 30, 5)], [1000, 1100])
+        logicals('EBR link backwards stops',
+                 {0: mbr([(0, 0x0f, 1000, 500)]),
+                  1000: ebr((0, 0x0c, 10, 20), (0, 0x05, 100, 50)),
+                  1100: ebr((0, 0x0c, 10, 30), (0, 0x05, 50, 50))},
+                 [(1010, 20, 4), (1110, 30, 5)], [1000, 1100])
+        logicals('EBR link of non-extended type stops',
+                 {0: mbr([(0, 0x0f, 1000, 500)]),
+                  1000: ebr((0, 0x0c, 10, 20), (0, 0x0c, 100, 50))},
+                 [(1010, 20, 4)], [1000])
+        logicals('EBR read failure keeps earlier records',
+                 {0: mbr([(0, 0x0c, 100, 8), (0, 0x0f, 1000, 500)]),
+                  1000: ebr((0, 0x0c, 10, 20), (0, 0x05, 100, 50))},
+                 [(100, 8, 0), (1010, 20, 4)], [1000, 1100])
+        logicals('EBR without signature stops',
+                 {0: mbr([(0, 0x0f, 1000, 500)]),
+                  1000: ebr((0, 0x0c, 10, 20))[:510] + b'\0\0'},
+                 [], [1000])
+        logicals('logical start beyond 32 bits skipped',
+                 {0: mbr([(0, 0x0f, 0xfffffff0, 500)]),
+                  0xfffffff0: ebr((0, 0x0c, 0x20, 20))},
+                 [])
+        logicals('EBR link beyond 32 bits stops',
+                 {0: mbr([(0, 0x0f, 0xfffffff0, 500)]),
+                  0xfffffff0: ebr((0, 0x0c, 1, 2), (0, 0x05, 0x20, 50))},
+                 [(0xfffffff1, 2, 4)], [0xfffffff0])
+
+        # Three primaries leave slot 3 for the extended one; the logicals fill
+        # the rest, the last taking index 4 + (PART_MAX_REC - 3) - 1.
+        chain = {0: mbr([(0, 0x0c, 10 + i, 1) for i in range(3)] + [(0, 0x0f, 1000, 5000)])}
+        for i in range(eq['PART_MAX_REC']):
+            chain[1000 + i * 100] = ebr((0, 0x0c, 10, 1), (0, 0x05, (i + 1) * 100, 50))
+        w = Walker(image, eq, chain)
+        w.mem.w_block(BLOCK, chain[0])
+        n = w.run('_partScanMBR', a0=BLOCK)
+        check('mbr logicals stop at PART_MAX_REC',
+              (n, w.records(n)[-1]['index'], len(w.reads)),
+              (eq['PART_MAX_REC'], eq['PART_MAX_REC'], eq['PART_MAX_REC'] - 3))
         w.close()
 
         # --- GPT, well-formed ----------------------------------------

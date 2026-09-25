@@ -99,7 +99,9 @@ companion to fat95's @{fg shine}lsfsres@{fg text} , which lists @{fg shine}FileS
            fit).                                   
   Unit     Device unit number.                     
   Part     Partition index within the card         
-           (0-based).                              
+           (0-based): MBR primary 0-3, logical 4   
+           onwards, GPT entry number, RDB list     
+           position.                               
   Src      Partition scheme: @{fg shine}MBR@{fg text} , @{fg shine}GPT@{fg text} , @{fg shine}RDB@{fg text} , or  
            @{fg shine}FLT@{fg text} (flat / superfloppy).               
   Pri      Boot priority.                          

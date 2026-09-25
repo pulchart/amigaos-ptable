@@ -1,7 +1,7 @@
 ;===========================================================
 ; parts.s - context-free MBR / GPT partition walker
 ;
-; Parses the four primary MBR slots and the GPT primary header
+; Parses the MBR (primary slots and the EBR chain) and the GPT primary header
 ; into a caller-supplied buffer of PartRec. Holds no globals:
 ; the caller passes a 512-byte block-reader callback and the
 ; output buffer. 512-byte sectors are assumed (CF cards).
@@ -23,76 +23,137 @@ REVL	macro
 	endm
 
 ;===========================================================
-; _partScanMBR - parse the four primary slots of a loaded MBR.
+; _partScanMBR - parse the four primary slots of a loaded MBR, then
+; the EBR chain of the first extended slot (logicals indexed 4..).
 ;
 ; Input : a0 = &block 0 (512 bytes, $55AA already verified;
 ;              slot-0 type already known != $EE), a2 = &PartRec
-;              output buffer (PART_MAX_REC * PR_Sizeof)
+;              output buffer (PART_MAX_REC * PR_Sizeof),
+;         a3 = block-reader callback (as _partScanGPT; it may
+;              overwrite the block 0 buffer), a4 = callback context
 ; Output: d0 = record count
-; Preserves d2-d7/a3-a6 (a0/a1 scratch).
+; Preserves d2-d7/a2-a6 (a0/a1 scratch).
 ;===========================================================
 _partScanMBR:
-	movem.l	d2-d6/a3,-(sp)
+	movem.l	d2-d7/a2/a5,-(sp)	;a2 advances as the output cursor
 	moveq.l	#0,d6			;d6 = record count
-	lea	446(a0),a3		;a3 = &slot 0
+	moveq.l	#0,d5			;d5 = extended start LBA (0 = none)
+	moveq.l	#0,d2			;d2 = base LBA: primaries are absolute
+	lea	446(a0),a5		;a5 = &slot 0
 	moveq.l	#0,d4			;d4 = slot index 0..3
 _psm_slot:
-	move.b	4(a3),d0		;partition type byte
-	bsr	_psm_isfat
-	tst.l	d0
-	beq.s	_psm_next
-	move.l	8(a3),d0		;relative start LBA (LE)
-	REVL	d0
-	move.l	12(a3),d1		;sector count (LE)
-	REVL	d1
-	tst.l	d1			;zero-size slot -> skip
-	beq.s	_psm_next
-	move.l	d6,d2
-	mulu.w	#PR_Sizeof,d2
-	lea	0(a2,d2.l),a1		;a1 = &PartRec[d6]
-	move.l	d0,PR_StartLBA(a1)
-	move.l	d1,PR_BlockCount(a1)
-	move.l	#DOSTYPE_FAT,PR_DosType(a1)
-	move.b	d4,PR_PartIndex(a1)
-	moveq.l	#1<<PRFB_PRESENT,d3
-	cmpi.b	#$80,(a3)		;status byte: active/bootable
-	bne.s	_psm_nb
-	bset	#PRFB_BOOTABLE,d3
-_psm_nb:
-	move.b	d3,PR_Flags(a1)
-	addq.l	#1,d6
 	cmp.l	#PART_MAX_REC,d6
-	bhs.s	_psm_done
+	bhs.w	_psm_done
+	move.b	4(a5),d0
+	lea	_psm_ext(pc),a1
+	bsr	_psm_intype
+	bne.s	_psm_prim
+	tst.l	d5
+	bne.s	_psm_next		;only the first extended slot is followed
+	tst.l	12(a5)
+	beq.s	_psm_next		;zero-size extended slot
+	move.l	8(a5),d5
+	REVL	d5
+	bra.s	_psm_next
+_psm_prim:
+	bsr	_psm_add
 _psm_next:
-	lea	16(a3),a3
+	lea	16(a5),a5
 	addq.l	#1,d4
 	cmp.l	#4,d4
 	blo.s	_psm_slot
+
+;-- logicals: each EBR holds one logical (entry 0, relative to the EBR)
+;   and a link to the next EBR (entry 1, relative to the extended start)
+	tst.l	d5
+	beq.s	_psm_done
+	move.l	d5,d7			;d7 = current EBR LBA
+_psm_ebr:
+	cmp.l	#PART_MAX_REC,d6
+	bhs.s	_psm_done
+	cmp.l	#100,d4			;same two-digit index budget as GPT
+	bhs.s	_psm_done
+	move.l	d7,d0
+	jsr	(a3)
+	tst.l	d0
+	bne.s	_psm_done
+	cmpi.w	#$55AA,510(a0)
+	bne.s	_psm_done
+	lea	446(a0),a5		;a5 = entry 0: the logical
+	move.l	d7,d2
+	bsr	_psm_add
+	tst.l	12(a5)
+	beq.s	_psm_link		;empty entry takes no index
+	addq.l	#1,d4
+_psm_link:
+	lea	16(a5),a5		;a5 = entry 1: link to the next EBR
+	move.b	4(a5),d0
+	lea	_psm_ext(pc),a1
+	bsr	_psm_intype
+	bne.s	_psm_done
+	move.l	8(a5),d0
+	REVL	d0
+	tst.l	d0
+	beq.s	_psm_done
+	add.l	d5,d0
+	bcs.s	_psm_done		;do not read a wrapped LBA
+	cmp.l	d7,d0
+	bls.s	_psm_done		;chain must ascend: breaks link cycles
+	move.l	d0,d7
+	bra.s	_psm_ebr
 _psm_done:
 	move.l	d6,d0
-	movem.l	(sp)+,d2-d6/a3
+	movem.l	(sp)+,d2-d7/a2/a5
 	rts
 
-;-- _psm_isfat: d0 = type byte in; d0 = 1 if FAT type else 0.
-;   Whitelist 01/04/06 (FAT12/16), 0b/0c (FAT32), 0e (FAT16 LBA).
-_psm_isfat:
-	cmpi.b	#$01,d0
-	beq.s	_psm_yes
-	cmpi.b	#$04,d0
-	beq.s	_psm_yes
-	cmpi.b	#$06,d0
-	beq.s	_psm_yes
-	cmpi.b	#$0b,d0
-	beq.s	_psm_yes
-	cmpi.b	#$0c,d0
-	beq.s	_psm_yes
-	cmpi.b	#$0e,d0
-	beq.s	_psm_yes
-	moveq.l	#0,d0
+;-- _psm_add: record the slot at a5 when FAT-typed and non-empty.
+;   In: a5 = &slot, d2 = base LBA, d4 = index, d6 = count, a2 = &next PartRec
+;   Out: d6/a2 advanced on a record. Clobbers d0/d1/d3/a1.
+_psm_add:
+	move.b	4(a5),d0
+	lea	_psm_fat(pc),a1
+	bsr	_psm_intype
+	bne.s	_psa_out
+	move.l	12(a5),d1		;sector count (LE)
+	REVL	d1
+	tst.l	d1			;zero-size slot -> skip
+	beq.s	_psa_out
+	move.l	8(a5),d0		;relative start LBA (LE)
+	REVL	d0
+	add.l	d2,d0
+	bcs.s	_psa_out		;start beyond 32 bits
+	move.l	d0,PR_StartLBA(a2)
+	move.l	d1,PR_BlockCount(a2)
+	move.l	#DOSTYPE_FAT,PR_DosType(a2)
+	move.b	d4,PR_PartIndex(a2)
+	moveq.l	#1<<PRFB_PRESENT,d3
+	cmpi.b	#$80,(a5)		;status byte: active/bootable
+	bne.s	_psa_nb
+	bset	#PRFB_BOOTABLE,d3
+_psa_nb:
+	move.b	d3,PR_Flags(a2)
+	lea	PR_Sizeof(a2),a2
+	addq.l	#1,d6
+_psa_out:
 	rts
-_psm_yes:
-	moveq.l	#1,d0
+
+;-- _psm_intype: d0 = type byte, a1 = 0-terminated type list; Z set if
+;   listed. Clobbers d1/a1.
+_psm_intype:
+	move.b	(a1)+,d1
+	beq.s	_psm_it_no
+	cmp.b	d1,d0
+	bne.s	_psm_intype
+	rts				;Z set: listed
+_psm_it_no:
+	moveq.l	#1,d1			;Z clear: not listed
 	rts
+
+;-- MBR type bytes: FAT12/16 01/04/06, FAT32 0b/0c, FAT16 LBA 0e;
+;   extended CHS 05, LBA 0f, Linux 85
+_psm_fat:	dc.b	$01,$04,$06,$0b,$0c,$0e,0
+_psm_ext:	dc.b	$05,$0f,$85,0
+	even
 
 ;===========================================================
 ; _partScanGPT - walk the GPT primary header + entry array.

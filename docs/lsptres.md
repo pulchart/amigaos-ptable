@@ -26,7 +26,7 @@ lsptres >SER:      ; forward output over the serial line
 | Name | Partition name. Shown as `name>dosname` when the partition is mounted under a different DOS name (e.g. `MFMa0>MS0`). |
 | Device | Device serving the partition (e.g. `compactflash.device`, truncated to fit). |
 | Unit | Device unit number. |
-| Part | Partition index within the card (0-based). |
+| Part | Partition index within the card (0-based): MBR primary 0-3, logical 4 onwards, GPT entry number, RDB list position. |
 | Src | Partition scheme: `MBR`, `GPT`, `RDB`, or `FLT` (flat / superfloppy). |
 | Pri | Boot priority. |
 | DosType | The DosType the mount uses, as hex. For a mounted partition this is the DosType its node carries, which is `0x464154FF` for a FAT partition on the auto-detect scheme, whatever was configured when a filesystem was chosen explicitly, or what the handler itself registered for a statically mounted one. An unmounted partition has no node, so it shows the DosType detected on the card (`0x46415400` for FAT). Needs a layout 3 publisher, otherwise the detected DosType is always shown. |
