@@ -12,7 +12,7 @@ _PARTS_I_	equ	1
 PR_StartLBA	= 0		;u32 absolute LBA (512-byte sectors)
 PR_BlockCount	= 4		;u32 sector count
 PR_DosType	= 8		;u32 DOS type for the DeviceNode envec
-PR_PartIndex	= 12		;u8  table slot index (MBR 0..3, GPT entry #)
+PR_PartIndex	= 12		;u8  table slot index (MBR 0..3, logical 4.., GPT entry #)
 PR_Flags	= 13		;u8  see PRFB_* below
 PR_Sizeof	= 16		;(pad to longword)
 
@@ -22,7 +22,7 @@ PRFB_GPT	= 1		;came from a GPT entry (else MBR)
 PRFB_BOOTABLE	= 2		;MBR status byte $80
 
 ;-- caller output buffer holds up to this many records
-PART_MAX_REC	= 8
+PART_MAX_REC	= 12
 
 ;-- DOSTYPE_FAT lives in ptable_pub.i (public ABI), included first by
 ;   every consumer of this file.
