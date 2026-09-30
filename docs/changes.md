@@ -1,10 +1,10 @@
-## 20260930-dev
+## 20260930
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
-- `ptable.library 2.1-dev (29.09.2026)` _(new)_
-- `lsptres 1.1-dev (30.09.2026)` _(new)_
+- `ptable.library 2.1 (30.09.2026)` _(new)_
+- `lsptres 1.1 (30.09.2026)` _(new)_
 <!-- COMPONENTS:END -->
 
 #### 'ptable.library 2.1'
@@ -15,7 +15,6 @@ _Components in this release_:
 #### 'lsptres 1.1'
 
 - The listing pauses a screenful at a time on a console; any key continues, `Q` stops, and the `-- more --` prompt is shown in italic, reversed. Redirected output is written in full.
-
 
 ## 20260911
 
