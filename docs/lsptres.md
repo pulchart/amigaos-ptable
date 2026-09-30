@@ -19,6 +19,8 @@ lsptres >SER:      ; forward output over the serial line
 
 `lsptres` reads the live resource. If nothing has been scanned yet, or `ptable.library` v2 is not resident, it prints `partition.resource not present` and exits.
 
+On an interactive console the listing pauses a screenful at a time: any key continues, Q stops. Redirected output is written in full.
+
 ## Columns
 
 | Column | Meaning |

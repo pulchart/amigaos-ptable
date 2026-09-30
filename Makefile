@@ -1,5 +1,5 @@
-VERSION = 20260929-dev
-DATE = 29.09.2026
+VERSION = 20260930-dev
+DATE = 30.09.2026
 
 PLIB_MAJOR = 2
 PLIB_MINOR = 1
@@ -8,9 +8,9 @@ PLIB_DATE  = 29.09.2026
 PLIB_VERSION = $(PLIB_MAJOR).$(PLIB_MINOR)$(PLIB_VERSION_SUFFIX)
 
 LSPTRES_MAJOR = 1
-LSPTRES_MINOR = 0
-LSPTRES_VERSION_SUFFIX =
-LSPTRES_DATE = 11.09.2026
+LSPTRES_MINOR = 1
+LSPTRES_VERSION_SUFFIX = -dev
+LSPTRES_DATE = 30.09.2026
 LSPTRES_VERSION = $(LSPTRES_MAJOR).$(LSPTRES_MINOR)$(LSPTRES_VERSION_SUFFIX)
 
 PLIB_NAME    = ptable.library
@@ -113,10 +113,10 @@ dist/lsptres.version: Makefile
 	$(Q)echo "$(LSPTRES_VERSION) $(LSPTRES_DATE)" > $@
 
 lsptres: dist/c/lsptres
-dist/c/lsptres: $(SRC)/lsptres.c Makefile
+dist/c/lsptres: $(SRC)/lsptres.c $(SRC)/page.c $(SRC)/page.h Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  VBCC    $@"
-	$(Q)VBCC=$(VBCC_HOME) PATH=$(VBCC_HOME)/bin:$$PATH $(VBCC) +aos68k -O2 -c99 -I$(NDK)/Include_H -DVERSION='"$(LSPTRES_VERSION)"' -DDATE='"$(LSPTRES_DATE)"' -o $@ $<
+	$(Q)VBCC=$(VBCC_HOME) PATH=$(VBCC_HOME)/bin:$$PATH $(VBCC) +aos68k -O2 -c99 -I$(NDK)/Include_H -DVERSION='"$(LSPTRES_VERSION)"' -DDATE='"$(LSPTRES_DATE)"' -o $@ $(SRC)/lsptres.c $(SRC)/page.c
 	$(Q)echo "          $$(stat -c%s $@) bytes, md5:$$(md5sum $@ | cut -c1-8)"
 
 guide guides: dist/docs/lsptres.guide dist/docs/ptable.guide dist/docs/changes.guide
