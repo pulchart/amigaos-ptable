@@ -1,11 +1,20 @@
-## 20260930
+## 20261001-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
+- `ptable.library 2.1 (30.09.2026)`
+- `lsptres 1.1 (30.09.2026)`
+<!-- COMPONENTS:END -->
+
+TBD
+
+## 20260930
+
+_Components in this release_:
+
 - `ptable.library 2.1 (30.09.2026)` _(new)_
 - `lsptres 1.1 (30.09.2026)` _(new)_
-<!-- COMPONENTS:END -->
 
 #### 'ptable.library 2.1'
 
