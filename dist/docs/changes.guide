@@ -10,7 +10,7 @@
 
 @{b}ptable.library release notes@{ub}
 
-    @{"20260929-dev" link 20260929_dev}
+    @{"20260930-dev" link 20260930_dev}
     @{"20260911" link 20260911}
     @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
 
@@ -21,23 +21,29 @@
 
   @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
   @{"20260911" link 20260911}
-  @{"20260929-dev" link 20260929_dev}
+  @{"20260930-dev" link 20260930_dev}
 
 @endnode
 
-@node 20260929_dev "20260929-dev"
-@{b}20260929-dev@{ub}
+@node 20260930_dev "20260930-dev"
+@{b}20260930-dev@{ub}
 
 @{i}Components in this release@{ui}:
 
   * @{fg shine}ptable.library 2.1-dev (29.09.2026)@{fg text} @{i}(new)@{ui}
-  * @{fg shine}lsptres 1.0 (11.09.2026)@{fg text}
+  * @{fg shine}lsptres 1.1-dev (30.09.2026)@{fg text} @{i}(new)@{ui}
 
 @{b}'ptable.library 2.1'@{ub}
 
   * A damaged GPT no longer produces bogus partitions.
   * MBR logical partitions inside an extended partition are found, numbered from 4
     ( @{fg shine}CF4@{fg text} , @{fg shine}CF5@{fg text} , ...).
+
+@{b}'lsptres 1.1'@{ub}
+
+  * The listing pauses a screenful at a time on a console; any key continues, @{fg shine}Q@{fg text}
+    stops, and the @{fg shine}-- more --@{fg text} prompt is shown in italic, reversed. Redirected
+    output is written in full.
 
 ----------------------------------------
 @{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20260911}
@@ -72,7 +78,7 @@
   * Lists the contents of @{fg shine}partition.resource@{fg text}. See @{"  lsptres.guide  " link "lsptres.guide/Main"}.
 
 ----------------------------------------
-@{"<< Prev" link 20260929_dev}  @{"Contents" link Main}  @{"Next >>" link 1_1__07_06_2026_}
+@{"<< Prev" link 20260930_dev}  @{"Contents" link Main}  @{"Next >>" link 1_1__07_06_2026_}
 
 @endnode
 

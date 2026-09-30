@@ -31,6 +31,8 @@ WHAT'S NEW (@DATE@)
 * A damaged GPT no longer produces bogus partitions.
 * MBR logical partitions inside an extended partition are found,
   numbered from 4 (CF4, CF5, ...).
+* lsptres pauses a screenful at a time on a console; any key continues,
+  Q stops. Redirected output is written in full.
 
 WHAT IT DOES
 ============

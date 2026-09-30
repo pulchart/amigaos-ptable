@@ -26,6 +26,8 @@ const char version[] = MAKE_VERSION_STRING("lsptres");
 
 #include <stdio.h>
 
+#include "page.h"
+
 #define PART_RESOURCE_NAME "partition.resource"
 
 /* pe_Source values (ptable_pub.i) */
@@ -250,19 +252,19 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
     struct PartEntry *pe;
     int row;
 
-    printf("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
+    pout("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
            "Name", "Device", "Unit", "Part", "Src", "Pri",
            "DosType", "Text", "Flags", "MFlg", "Ctrl");
     if (verbose)
-        printf(" %-5s %10s %11s %6s", "CMD", "Start", "Blocks", "Size");
-    printf("\r\n");
+        pout(" %-5s %10s %11s %6s", "CMD", "Start", "Blocks", "Size");
+    pout("\r\n");
 
-    printf("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
+    pout("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
            "------------", "-------------", "----", "----", "---", "---",
            "----------", "----", "-----", "-----", "----------");
     if (verbose)
-        printf(" %-5s %10s %11s %6s", "-----", "----------", "-----------", "------");
-    printf("\r\n");
+        pout(" %-5s %10s %11s %6s", "-----", "----------", "-----------", "------");
+    pout("\r\n");
 
     for (row = 0; row < count; row++) {
         ULONG dt;
@@ -276,7 +278,7 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
         dt = pe->pe_DosType;
         if (nodedt && pe->pe_NodeDosType && (pe->pe_Flags & PEF_MOUNTED))
             dt = pe->pe_NodeDosType;
-        printf("%-12s %-13.13s %4lu %4lu %-3s %3ld 0x%08lX ",
+        pout("%-12s %-13.13s %4lu %4lu %-3s %3ld 0x%08lX ",
                merged_name(pe),
                pe->pe_Device ? pe->pe_Device : (char *)"?",
                (unsigned long)pe->pe_Unit,
@@ -285,7 +287,7 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                (long)pe->pe_BootPri,
                (unsigned long)dt);
         print_dostype(dt);
-        printf(" %-5s %5lu %-10s",
+        pout(" %-5s %5lu %-10s",
                flags_str(pe),
                (unsigned long)pe->pe_MountFlags,
                ctrl_str(pe));
@@ -299,19 +301,19 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                 size = (unsigned long)(pe->pe_BlockCount / 2);
                 unit = 'K';
             }
-            printf(" %-5s %10lu %11lu %5lu%c",
+            pout(" %-5s %10lu %11lu %5lu%c",
                    cmd_name(pe->pe_ReadMode),
                    (unsigned long)pe->pe_StartLBA,
                    (unsigned long)pe->pe_BlockCount,
                    size, unit);
         }
-        printf("\r\n");
+        pout("\r\n");
     }
 }
 
 static void usage(void)
 {
-    printf("lsptres " STR(VERSION) " - list partition.resource\r\n"
+    pout("lsptres " STR(VERSION) " - list partition.resource\r\n"
            "Usage: lsptres [VERBOSE|V]\r\n"
            "  VERBOSE (V)  also show CMD / Start / Blocks / Size (lines may wrap)\r\n"
            "\r\n"
@@ -327,7 +329,7 @@ static void usage(void)
            "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\r\n");
 }
 
-int main(void)
+static int run(void)
 {
     struct PartResource *res;
     struct RDArgs *rda;
@@ -342,7 +344,7 @@ int main(void)
 
     res = (struct PartResource *)OpenResource(PART_RESOURCE_NAME);
     if (!res) {
-        printf("%s not present (nothing scanned yet)\r\n",
+        pout("%s not present (nothing scanned yet)\r\n",
                PART_RESOURCE_NAME);
         FreeArgs(rda);
         return 0;
@@ -357,11 +359,11 @@ int main(void)
         if (possize >= 98 && res->pr_Layout >= 4)
             g_layout4 = 1;
         if (possize >= 98 && res->pr_Layout > PTR_LAYOUT_KNOWN)
-            printf("note: resource layout v%u is newer than this tool (v%u); "
+            pout("note: resource layout v%u is newer than this tool (v%u); "
                    "appended fields are not shown\r\n",
                    res->pr_Layout, PTR_LAYOUT_KNOWN);
         if (opt[0] && possize >= 98)
-            printf("layout v%u, entry size %u\r\n",
+            pout("layout v%u, entry size %u\r\n",
                    res->pr_Layout, res->pr_EntrySize);
     }
 
@@ -372,9 +374,19 @@ int main(void)
 
         view_all(sn, shown, opt[0] ? 1 : 0, have_nodedt);
         if (total > shown)
-            printf("(%d more entries not shown)\r\n", total - shown);
+            pout("(%d more entries not shown)\r\n", total - shown);
     }
 
     FreeArgs(rda);
     return 0;
+}
+
+int main(void)
+{
+    int rc;
+
+    page_begin();
+    rc = run();
+    page_end();
+    return rc;
 }

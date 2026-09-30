@@ -1,16 +1,20 @@
-## 20260929-dev
+## 20260930-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
 - `ptable.library 2.1-dev (29.09.2026)` _(new)_
-- `lsptres 1.0 (11.09.2026)`
+- `lsptres 1.1-dev (30.09.2026)` _(new)_
 <!-- COMPONENTS:END -->
 
 #### 'ptable.library 2.1'
 
 - A damaged GPT no longer produces bogus partitions.
 - MBR logical partitions inside an extended partition are found, numbered from 4 (`CF4`, `CF5`, ...).
+
+#### 'lsptres 1.1'
+
+- The listing pauses a screenful at a time on a console; any key continues, `Q` stops, and the `-- more --` prompt is shown in italic, reversed. Redirected output is written in full.
 
 
 ## 20260911
