@@ -10,6 +10,7 @@
 
 @{b}ptable.library release notes@{ub}
 
+    @{"20261001-dev" link 20261001_dev}
     @{"20260930" link 20260930}
     @{"20260911" link 20260911}
     @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
@@ -22,6 +23,22 @@
   @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
   @{"20260911" link 20260911}
   @{"20260930" link 20260930}
+  @{"20261001-dev" link 20261001_dev}
+
+@endnode
+
+@node 20261001_dev "20261001-dev"
+@{b}20261001-dev@{ub}
+
+@{i}Components in this release@{ui}:
+
+  * @{fg shine}ptable.library 2.1 (30.09.2026)@{fg text}
+  * @{fg shine}lsptres 1.1 (30.09.2026)@{fg text}
+
+TBD
+
+----------------------------------------
+@{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20260930}
 
 @endnode
 
@@ -46,7 +63,7 @@
     output is written in full.
 
 ----------------------------------------
-@{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20260911}
+@{"<< Prev" link 20261001_dev}  @{"Contents" link Main}  @{"Next >>" link 20260911}
 
 @endnode
 
