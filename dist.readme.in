@@ -28,7 +28,8 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-TBD
+* ptable.library: on controllers without TD64 or NSD support but with
+  SCSI, partitions beyond 4 GB could go unrecognised.
 
 WHAT IT DOES
 ============
