@@ -1,11 +1,28 @@
-## 20260930
+## 20261003-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
+- `ptable.library 2.2 (03.10.2026)` _(new)_
+- `lsptres 1.2 (03.10.2026)` _(new)_
+<!-- COMPONENTS:END -->
+
+#### 'ptable.library 2.2'
+
+- Fixed: on controllers without TD64 or NSD support but with SCSI, partitions beyond 4 GB could go unrecognised.
+- Serial debug output ends lines with LF alone.
+
+#### 'lsptres 1.2'
+
+- Improved paging: in a narrow window, long lines no longer scroll the listing away before it pauses.
+- Output lines end in LF alone.
+
+## 20260930
+
+_Components in this release_:
+
 - `ptable.library 2.1 (30.09.2026)` _(new)_
 - `lsptres 1.1 (30.09.2026)` _(new)_
-<!-- COMPONENTS:END -->
 
 #### 'ptable.library 2.1'
 

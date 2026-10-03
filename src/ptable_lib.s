@@ -161,10 +161,9 @@ scsi_CmdLength	= 16
 scsi_Flags	= 20
 scsi_Status	= 21
 scsi_Sizeof	= 30
-SCSIF_READ	= 2
+SCSIF_READ	= 1
 
-;CR/LF for debug strings
-CR		= 13
+;LF for debug strings; the terminal adds its own carriage return
 LF		= 10
 
 ;--- LibBase layout ----------------------------------------

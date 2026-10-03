@@ -323,11 +323,11 @@ FileSysResName:
 ;--- Debug strings (only emitted in DEBUG builds) ----------
 	ifd	DEBUG
 dbg_boot_start:
-	dc.b	"[PT] cold boot: scanning for partitions",CR,LF,0
+	dc.b	"[PT] cold boot: scanning for partitions",LF,0
 dbg_boot_no_card:
-	dc.b	"[PT] no card / no media",CR,LF,0
+	dc.b	"[PT] no card / no media",LF,0
 dbg_boot_no_rdb:
-	dc.b	"[PT] no partition table (not RDB/MBR/GPT/FAT)",CR,LF,0
+	dc.b	"[PT] no partition table (not RDB/MBR/GPT/FAT)",LF,0
 dbg_boot_fs_add:
 	dc.b	"[PT] + filesystem handler ",0
 dbg_boot_part_boot:
@@ -339,19 +339,19 @@ dbg_boot_part_skip:
 dbg_boot_done:
 	dc.b	"[PT] cold boot done, partitions registered: ",0
 dbg_boot_exp_fail:
-	dc.b	"[PT] error: expansion.library not available",CR,LF,0
+	dc.b	"[PT] error: expansion.library not available",LF,0
 dbg_boot_no_mem:
-	dc.b	"[PT] error: out of memory",CR,LF,0
+	dc.b	"[PT] error: out of memory",LF,0
 dbg_boot_opendev_err:
 	dc.b	"[PT] cannot open device, error ",0
 dbg_boot_rdsk_found:
-	dc.b	"[PT] RDB partition table",CR,LF,0
+	dc.b	"[PT] RDB partition table",LF,0
 dbg_boot_nl:
-	dc.b	CR,LF,0
+	dc.b	LF,0
 dbg_boot_skip_tail:
-	dc.b	" (no-mount)",CR,LF,0
+	dc.b	" (no-mount)",LF,0
 dbg_boot_skip_src:
-	dc.b	" (not RDB: mounted at DOS time)",CR,LF,0
+	dc.b	" (not RDB: mounted at DOS time)",LF,0
 dbg_hunk_badid:
 	dc.b	"[PT] hunk: bad id $",0
 	endc
@@ -1399,14 +1399,12 @@ _bootDebugVersionNL:
 	and.l	#$ffff,d0
 	bsr	_bootDebugDecW
 	move.l	(_AbsExecBase).w,a6
-	moveq.l	#13,d0
-	jsr	RawPutChar(a6)
-	moveq.l	#10,d0
+	moveq.l	#LF,d0
 	jsr	RawPutChar(a6)
 	movem.l	(sp)+,d0-d2/a0/a6
 	rts
 
-;-- Print a BSTR (length byte + chars) followed by CR/LF.
+;-- Print a BSTR (length byte + chars) followed by LF.
 ;   a0 = BSTR pointer. Length is clamped to 31 so a garbage
 ;   length byte in a raw RDB block can't run away.
 ;   Callers: pb_DriveName (skip path, pre-blob) and the deduped
@@ -1428,14 +1426,12 @@ _bdbs_lp:
 	jsr	RawPutChar(a6)
 	dbra	d3,_bdbs_lp
 _bdbs_nl:
-	moveq.l	#13,d0
-	jsr	RawPutChar(a6)
-	moveq.l	#10,d0
+	moveq.l	#LF,d0
 	jsr	RawPutChar(a6)
 	movem.l	(sp)+,d0/d3/a0/a6
 	rts
 
-;-- Print a BSTR (length byte + chars), NO trailing CR/LF, so a name can
+;-- Print a BSTR (length byte + chars), NO trailing LF, so a name can
 ;   be followed by more text on the same line. a0 = BSTR, clamp 31.
 _bootDebugBStrR:
 	movem.l	d0/d3/a0/a6,-(sp)
@@ -1457,7 +1453,7 @@ _bdsr_end:
 	movem.l	(sp)+,d0/d3/a0/a6
 	rts
 
-;-- Print d0.l as unsigned decimal (full 32-bit), no CR/LF. Two divu
+;-- Print d0.l as unsigned decimal (full 32-bit), no LF. Two divu
 ;   steps give a full 32-bit quotient; digits are stacked then emitted.
 _bootDebugDec32:
 	movem.l	d0-d5/a0/a6,-(sp)
@@ -1502,7 +1498,7 @@ _bdd_done:
 	movem.l	(sp)+,d0-d5/a0/a6
 	rts
 
-;-- Print " (<dostype>, <MB> MB)" + CR/LF for the PartEntry in a3.
+;-- Print " (<dostype>, <MB> MB)" + LF for the PartEntry in a3.
 ;   MB = pe_BlockCount >> 11 (512-byte sectors -> MiB).
 _bootDebugPartTail:
 	movem.l	d0/a0,-(sp)
@@ -1523,6 +1519,6 @@ _bootDebugPartTail:
 
 s_pt_lparen:	dc.b	" (",0
 s_pt_comma:	dc.b	", ",0
-s_pt_mbnl:	dc.b	" MB)",CR,LF,0
+s_pt_mbnl:	dc.b	" MB)",LF,0
 	even
 	endc	;DEBUG

@@ -155,7 +155,7 @@ A volume that is still in use is the ordinary reason an unmount does not happen.
 
 ## What it looks like (serial debug)
 
-The `full` build prints its progress to the serial port at 9600 baud, the `small` build is silent. The library tags its own lines `[PT]`. In the traces below the surrounding `[CFD] boot:` and `[MW]` lines come from `compactflash.device` and show where the library was called from.
+The `full` build prints its progress to the serial port at 9600 baud, the `small` build is silent. The library tags its own lines `[PT]`. Lines end with a line feed only, so turn on the terminal's own carriage return: `Implicit CR in every LF` in PuTTY, `Add carriage return` in minicom. In the traces below the surrounding `[CFD] boot:` and `[MW]` lines come from `compactflash.device` and show where the library was called from.
 
 **Cold boot, RDB autoboot.** The cold stub opens the library and calls `BootScanPartitions`:
 

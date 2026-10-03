@@ -7,7 +7,7 @@
 /* Page stdout when input and output are one console; see page.c. */
 void page_begin(void);
 void page_end(void);
-/* printf that keeps the page accounting; one newline in fmt = one line. */
+/* printf that keeps the page accounting, counting wrapped lines. */
 void pout(const char *fmt, ...);
 
 #endif

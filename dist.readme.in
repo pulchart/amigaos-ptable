@@ -1,12 +1,12 @@
-Short:        AmigaOS partition-table library (RDB/MBR/GPT)
+Short:        Partition-table library
 Uploader:     jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Author:       jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Type:         util/libs
 Version:      @VERSION@
 Requires:     AmigaOS 2.0+
 Architecture: m68k-amigaos
-Replaces:     util/libs/ptable.v20260911.lha
-Kurz:         AmigaOS Partitionstabellen-Library (RDB/MBR/GPT)
+Replaces:     util/libs/ptable.v20260930.lha
+Kurz:         Partitionstabellen-Library
 
 ptable.library is the AmigaOS partition-table library (one place that parses
 RDB, MBR, GPT and flat layouts and publishes every partition into a shared
@@ -28,11 +28,12 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-* A damaged GPT no longer produces bogus partitions.
-* MBR logical partitions inside an extended partition are found,
-  numbered from 4 (CF4, CF5, ...).
-* lsptres pauses a screenful at a time on a console; any key continues,
-  Q stops. Redirected output is written in full.
+* ptable.library: on controllers without TD64 or NSD support but with
+  SCSI, partitions beyond 4 GB could go unrecognised.
+* ptable.library: serial debug output ends lines with LF alone.
+* Improved paging in lsptres: in a narrow window, long lines no longer
+  scroll the listing away before it pauses.
+* lsptres: output lines end in LF alone.
 
 WHAT IT DOES
 ============
