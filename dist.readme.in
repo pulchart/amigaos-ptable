@@ -1,4 +1,4 @@
-Short:        Partition-table library (RDB/MBR/GPT)
+Short:        Partition-table library
 Uploader:     jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Author:       jaroslav.pulchart@gmail.com (Jaroslav Pulchart)
 Type:         util/libs
@@ -6,7 +6,7 @@ Version:      @VERSION@
 Requires:     AmigaOS 2.0+
 Architecture: m68k-amigaos
 Replaces:     util/libs/ptable.v20260930.lha
-Kurz:         Partitionstabellen-Library (RDB/MBR/GPT)
+Kurz:         Partitionstabellen-Library
 
 ptable.library is the AmigaOS partition-table library (one place that parses
 RDB, MBR, GPT and flat layouts and publishes every partition into a shared
