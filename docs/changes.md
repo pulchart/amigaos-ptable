@@ -1,13 +1,15 @@
-## 20261001-dev
+## 20261003-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
-- `ptable.library 2.1 (30.09.2026)`
+- `ptable.library 2.2 (03.10.2026)` _(new)_
 - `lsptres 1.1 (30.09.2026)`
 <!-- COMPONENTS:END -->
 
-TBD
+#### 'ptable.library 2.2'
+
+- Fixed: on controllers without TD64 or NSD support but with SCSI, partitions beyond 4 GB could go unrecognised.
 
 ## 20260930
 
