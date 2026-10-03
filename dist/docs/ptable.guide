@@ -531,7 +531,9 @@ Workbench window, and the next removal unmounts it.
 @{b}What it looks like (serial debug)@{ub}
 
 The @{fg shine}full@{fg text} build prints its progress to the serial port at 9600 baud, the
-@{fg shine}small@{fg text} build is silent. The library tags its own lines @{fg shine}[PT]@{fg text} . In the
+@{fg shine}small@{fg text} build is silent. The library tags its own lines @{fg shine}[PT]@{fg text} . Lines end
+with a line feed only, so turn on the terminal's own carriage return:
+@{fg shine}Implicit CR in every LF@{fg text} in PuTTY, @{fg shine}Add carriage return@{fg text} in minicom. In the
 traces below the surrounding @{fg shine}[CFD] boot:@{fg text} and @{fg shine}[MW]@{fg text} lines come from
 @{fg shine}compactflash.device@{fg text} and show where the library was called from.
 

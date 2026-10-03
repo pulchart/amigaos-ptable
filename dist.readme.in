@@ -30,8 +30,10 @@ WHAT'S NEW (@DATE@)
 
 * ptable.library: on controllers without TD64 or NSD support but with
   SCSI, partitions beyond 4 GB could go unrecognised.
+* ptable.library: serial debug output ends lines with LF alone.
 * Improved paging in lsptres: in a narrow window, long lines no longer
   scroll the listing away before it pauses.
+* lsptres: output lines end in LF alone.
 
 WHAT IT DOES
 ============

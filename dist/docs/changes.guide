@@ -39,11 +39,13 @@
 
   * Fixed: on controllers without TD64 or NSD support but with SCSI, partitions
     beyond 4 GB could go unrecognised.
+  * Serial debug output ends lines with LF alone.
 
 @{b}'lsptres 1.2'@{ub}
 
   * Improved paging: in a narrow window, long lines no longer scroll the listing
     away before it pauses.
+  * Output lines end in LF alone.
 
 ----------------------------------------
 @{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20260930}
