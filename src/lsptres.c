@@ -257,14 +257,14 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
            "DosType", "Text", "Flags", "MFlg", "Ctrl");
     if (verbose)
         pout(" %-5s %10s %11s %6s", "CMD", "Start", "Blocks", "Size");
-    pout("\r\n");
+    pout("\n");
 
     pout("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
            "------------", "-------------", "----", "----", "---", "---",
            "----------", "----", "-----", "-----", "----------");
     if (verbose)
         pout(" %-5s %10s %11s %6s", "-----", "----------", "-----------", "------");
-    pout("\r\n");
+    pout("\n");
 
     for (row = 0; row < count; row++) {
         ULONG dt;
@@ -307,26 +307,26 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                    (unsigned long)pe->pe_BlockCount,
                    size, unit);
         }
-        pout("\r\n");
+        pout("\n");
     }
 }
 
 static void usage(void)
 {
-    pout("lsptres " STR(VERSION) " - list partition.resource\r\n"
-           "Usage: lsptres [VERBOSE|V]\r\n"
-           "  VERBOSE (V)  also show CMD / Start / Blocks / Size (lines may wrap)\r\n"
-           "\r\n"
-           "Name:  partition name, plus \">dosname\" when mounted under another name\r\n"
-           "Src:   MBR GPT RDB FLT   (partition scheme)\r\n"
-           "Flags: P present  I invalid (card in, slot not on it)  B bootable  N nomount  M mounted\r\n"
-           "       5th char: static mount (hand DOSDriver node): S kept on card removal,\r\n"
-           "       s follows the UNMOUNT policy; - not static\r\n"
-           "MFlg:  mount Flags the partition was mounted with\r\n"
-           "Ctrl:  CONTROL string resolved for this mount\r\n"
-           "DosType: the DosType the mount uses - for a mounted partition the\r\n"
-           "       one its node carries, else the one detected on the card\r\n"
-           "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\r\n");
+    pout("lsptres " STR(VERSION) " - list partition.resource\n"
+           "Usage: lsptres [VERBOSE|V]\n"
+           "  VERBOSE (V)  also show CMD / Start / Blocks / Size (lines may wrap)\n"
+           "\n"
+           "Name:  partition name, plus \">dosname\" when mounted under another name\n"
+           "Src:   MBR GPT RDB FLT   (partition scheme)\n"
+           "Flags: P present  I invalid (card in, slot not on it)  B bootable  N nomount  M mounted\n"
+           "       5th char: static mount (hand DOSDriver node): S kept on card removal,\n"
+           "       s follows the UNMOUNT policy; - not static\n"
+           "MFlg:  mount Flags the partition was mounted with\n"
+           "Ctrl:  CONTROL string resolved for this mount\n"
+           "DosType: the DosType the mount uses - for a mounted partition the\n"
+           "       one its node carries, else the one detected on the card\n"
+           "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\n");
 }
 
 static int run(void)
@@ -344,7 +344,7 @@ static int run(void)
 
     res = (struct PartResource *)OpenResource(PART_RESOURCE_NAME);
     if (!res) {
-        pout("%s not present (nothing scanned yet)\r\n",
+        pout("%s not present (nothing scanned yet)\n",
                PART_RESOURCE_NAME);
         FreeArgs(rda);
         return 0;
@@ -360,10 +360,10 @@ static int run(void)
             g_layout4 = 1;
         if (possize >= 98 && res->pr_Layout > PTR_LAYOUT_KNOWN)
             pout("note: resource layout v%u is newer than this tool (v%u); "
-                   "appended fields are not shown\r\n",
+                   "appended fields are not shown\n",
                    res->pr_Layout, PTR_LAYOUT_KNOWN);
         if (opt[0] && possize >= 98)
-            pout("layout v%u, entry size %u\r\n",
+            pout("layout v%u, entry size %u\n",
                    res->pr_Layout, res->pr_EntrySize);
     }
 
@@ -374,7 +374,7 @@ static int run(void)
 
         view_all(sn, shown, opt[0] ? 1 : 0, have_nodedt);
         if (total > shown)
-            pout("(%d more entries not shown)\r\n", total - shown);
+            pout("(%d more entries not shown)\n", total - shown);
     }
 
     FreeArgs(rda);

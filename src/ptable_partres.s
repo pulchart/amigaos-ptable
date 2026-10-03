@@ -21,27 +21,27 @@ PartResName:
 ;-- trace strings (DEBUG builds; PTMSG/PTNUM macros in ptable_boot.s)
 	ifd	DEBUG
 dbg_pt_scan:
-	dc.b	"[PT] scanning for partitions",CR,LF,0
+	dc.b	"[PT] scanning for partitions",LF,0
 dbg_pt_open:
-	dc.b	"[PT] cannot open device (no media?)",CR,LF,0
+	dc.b	"[PT] cannot open device (no media?)",LF,0
 dbg_pt_recs:
 	dc.b	"[PT] new partitions: ",0
 dbg_pt_mbr:
-	dc.b	"[PT] MBR partition table",CR,LF,0
+	dc.b	"[PT] MBR partition table",LF,0
 dbg_pt_gpt:
-	dc.b	"[PT] GPT partition table",CR,LF,0
+	dc.b	"[PT] GPT partition table",LF,0
 dbg_pt_flat:
-	dc.b	"[PT] whole-disk FAT (superfloppy)",CR,LF,0
+	dc.b	"[PT] whole-disk FAT (superfloppy)",LF,0
 dbg_pt_mnt:
-	dc.b	"[PT] mounting partitions",CR,LF,0
+	dc.b	"[PT] mounting partitions",LF,0
 dbg_pt_umnt:
-	dc.b	"[PT] unmounting partitions",CR,LF,0
+	dc.b	"[PT] unmounting partitions",LF,0
 dbg_pt_umnt_keep:
-	dc.b	"[PT] partition kept, marked absent",CR,LF,0
+	dc.b	"[PT] partition kept, marked absent",LF,0
 dbg_pt_die_mute:
-	dc.b	"[PT] ACTION_DIE unanswered, handler alive",CR,LF,0
+	dc.b	"[PT] ACTION_DIE unanswered, handler alive",LF,0
 dbg_pt_dl_busy:
-	dc.b	"[PT] DOS list busy, node kept",CR,LF,0
+	dc.b	"[PT] DOS list busy, node kept",LF,0
 dbg_pt_die_no:
 	dc.b	"[PT] ACTION_DIE declined, code ",0
 dbg_pt_mounted:
@@ -57,7 +57,7 @@ dbg_pt_unreg:
 dbg_pt_mountedas:
 	dc.b	"[PT] mounted as ",0
 dbg_pt_absent:
-	dc.b	"[PT] card removed, media absent",CR,LF,0
+	dc.b	"[PT] card removed, media absent",LF,0
 	even
 	endc
 
