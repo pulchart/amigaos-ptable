@@ -33,12 +33,17 @@
 @{i}Components in this release@{ui}:
 
   * @{fg shine}ptable.library 2.2 (03.10.2026)@{fg text} @{i}(new)@{ui}
-  * @{fg shine}lsptres 1.1 (30.09.2026)@{fg text}
+  * @{fg shine}lsptres 1.2 (03.10.2026)@{fg text} @{i}(new)@{ui}
 
 @{b}'ptable.library 2.2'@{ub}
 
   * Fixed: on controllers without TD64 or NSD support but with SCSI, partitions
     beyond 4 GB could go unrecognised.
+
+@{b}'lsptres 1.2'@{ub}
+
+  * Improved paging: in a narrow window, long lines no longer scroll the listing
+    away before it pauses.
 
 ----------------------------------------
 @{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20260930}

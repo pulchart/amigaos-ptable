@@ -4,12 +4,16 @@
 _Components in this release_:
 
 - `ptable.library 2.2 (03.10.2026)` _(new)_
-- `lsptres 1.1 (30.09.2026)`
+- `lsptres 1.2 (03.10.2026)` _(new)_
 <!-- COMPONENTS:END -->
 
 #### 'ptable.library 2.2'
 
 - Fixed: on controllers without TD64 or NSD support but with SCSI, partitions beyond 4 GB could go unrecognised.
+
+#### 'lsptres 1.2'
+
+- Improved paging: in a narrow window, long lines no longer scroll the listing away before it pauses.
 
 ## 20260930
 
