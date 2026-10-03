@@ -110,7 +110,7 @@ static void print_dostype(ULONG dt)
     int i;
     for (i = 24; i >= 0; i -= 8) {
         UBYTE c = (UBYTE)(dt >> i);
-        putchar((c >= 0x20 && c < 0x7f) ? c : '.');
+        pout("%c", (c >= 0x20 && c < 0x7f) ? c : '.');
     }
 }
 
