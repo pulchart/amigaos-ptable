@@ -1,0 +1,8 @@
+; $VER: Install-ptable @VERSION@ (@DATE@)
+(set @default-dest "SYS:")
+(welcome "Installs ptable.library to LIBS: and, optionally, lsptres to C:.")
+(set ptable-src "")
+(set ptable-libdir "/libs/")
+(set ptable-ask-cpu 1)
+(set ptable-cpu "68020")
+(set ptable-ask-lsptres 1)

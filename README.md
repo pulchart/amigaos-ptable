@@ -14,6 +14,18 @@ It was assembled from existing code: the library framework and RDB cold-boot pat
 
 See [`docs/ptable.md`](docs/ptable.md) for the end-user guide: what it is, configuration, and the public interface. The `partition.resource` and `PartEntry` field layout is in [`src/ptable_pub.i`](src/ptable_pub.i).
 
+# Installation
+
+- Double-click `Install`. It detects the CPU, copies `ptable.library` to `LIBS:` (small variant, full in Expert mode) and optionally `lsptres` to `C:`. Needs Installer 43.3 or newer.
+
+  I recommend putting `ptable.library` in ROM as a resident module.
+
+By hand:
+
+1. Copy `<flavor>/<cpu>/libs/ptable.library` to `LIBS:`. CPU: `68020/` for 68020 or higher, `68000/` for 68000/68010. Flavor: `full` has serial debug output, `small` no debug code.
+2. Copy `c/lsptres` to `C:` (optional).
+3. For cold-boot autoboot, put `ptable.library` in ROM with Remus or Capitoline.
+
 # amigaos-ptable's cli
 
 `lsptres`: is a small CLI that dumps `partition.resource`. See [`docs/lsptres.md`](docs/lsptres.md) for usage.
@@ -21,6 +33,10 @@ See [`docs/ptable.md`](docs/ptable.md) for the end-user guide: what it is, confi
 # Release notes
 
 See [`docs/changes.md`](docs/changes.md) for release news and history.
+
+# Building
+
+See [`docs/building.md`](docs/building.md).
 
 # License
 
