@@ -3,3 +3,4 @@ ptable*.readme
 NDK/
 __pycache__/
 *.py[co]
+build/

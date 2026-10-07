@@ -1,4 +1,4 @@
-## 20261003-dev
+## 20261007
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
@@ -7,14 +7,18 @@ _Components in this release_:
 - `lsptres 1.2 (03.10.2026)` _(new)_
 <!-- COMPONENTS:END -->
 
-#### 'ptable.library 2.2'
+#### Install
+- New Installer script.
+- Reworked icon positions.
 
-- Fixed: on controllers without TD64 or NSD support but with SCSI, partitions beyond 4 GB could go unrecognised.
+#### ptable.library 2.2
+- Fixed SCSI reads for partition detection.
 - Serial debug output ends lines with LF alone.
 
-#### 'lsptres 1.2'
+#### Tools
 
-- Improved paging: in a narrow window, long lines no longer scroll the listing away before it pauses.
+##### 'lsptres 1.2'
+- Improved paging.
 - Output lines end in LF alone.
 
 ## 20260930

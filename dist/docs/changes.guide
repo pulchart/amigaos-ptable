@@ -10,7 +10,7 @@
 
 @{b}ptable.library release notes@{ub}
 
-    @{"20261003-dev" link 20261003_dev}
+    @{"20261007" link 20261007}
     @{"20260930" link 20260930}
     @{"20260911" link 20260911}
     @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
@@ -23,28 +23,30 @@
   @{"1.1 (07.06.2026)" link 1_1__07_06_2026_}
   @{"20260911" link 20260911}
   @{"20260930" link 20260930}
-  @{"20261003-dev" link 20261003_dev}
+  @{"20261007" link 20261007}
 
 @endnode
 
-@node 20261003_dev "20261003-dev"
-@{b}20261003-dev@{ub}
+@node 20261007 "20261007"
+@{b}20261007@{ub}
 
 @{i}Components in this release@{ui}:
 
   * @{fg shine}ptable.library 2.2 (03.10.2026)@{fg text} @{i}(new)@{ui}
   * @{fg shine}lsptres 1.2 (03.10.2026)@{fg text} @{i}(new)@{ui}
 
-@{b}'ptable.library 2.2'@{ub}
+@{b}Install@{ub}
+  * New Installer script.
+  * Reworked icon positions.
 
-  * Fixed: on controllers without TD64 or NSD support but with SCSI, partitions
-    beyond 4 GB could go unrecognised.
+@{b}ptable.library 2.2@{ub}
+  * Fixed SCSI reads for partition detection.
   * Serial debug output ends lines with LF alone.
 
-@{b}'lsptres 1.2'@{ub}
+@{b}Tools@{ub}
 
-  * Improved paging: in a narrow window, long lines no longer scroll the listing
-    away before it pauses.
+@{b}'lsptres 1.2'@{ub}
+  * Improved paging.
   * Output lines end in LF alone.
 
 ----------------------------------------
@@ -73,7 +75,7 @@
     output is written in full.
 
 ----------------------------------------
-@{"<< Prev" link 20261003_dev}  @{"Contents" link Main}  @{"Next >>" link 20260911}
+@{"<< Prev" link 20261007}  @{"Contents" link Main}  @{"Next >>" link 20260911}
 
 @endnode
 

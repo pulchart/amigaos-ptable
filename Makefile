@@ -1,5 +1,5 @@
-VERSION = 20261003-dev
-DATE = 03.10.2026
+VERSION = 20261007
+DATE = 07.10.2026
 
 PLIB_MAJOR = 2
 PLIB_MINOR = 2
@@ -68,7 +68,7 @@ README_TEMPLATE = dist.readme.in
 
 COMPONENT_VERSIONS_NL = $(shell sh tools/components.sh plain $(COMPONENT_ARGS))
 
-.PHONY: all clean distclean lsptres guide guides version-readme readme release check-lha test check-test-deps test-list-update
+.PHONY: all clean distclean lsptres guide guides version-readme readme release check-lha stage test check-test-deps test-list-update
 all: $(TARGETS) dist/ptable.version dist/lsptres.version dist/c/lsptres
 
 # Rewrite the topmost release-notes header and the COMPONENTS block in
@@ -165,23 +165,30 @@ $(README_NAME): $(README_TEMPLATE) $(TARGETS) dist/c/lsptres
 	    $(README_TEMPLATE) > $(README_NAME)
 	@echo "Generated: $(README_NAME)"
 
-# Create the Aminet-compatible LHA release (archive + readme).
-release: check-lha version-readme all guides readme
-	@echo "Creating Aminet release: $(ARCHIVE_NAME)"
-	$(eval STAGING := $(shell mktemp -d))
-	@for f in $(FLAVORS); do \
-		mkdir -p "$(STAGING)/ptable/$$f/libs"; \
-		cp "dist/$$f/ptable.library" "$(STAGING)/ptable/$$f/libs/"; \
+# Archive tree: binaries, Installer script and the laid-out icons/ tree.
+STAGE   = build/stage
+INSTALL = install
+
+stage: all guides readme
+	$(Q)rm -rf $(STAGE)
+	$(Q)mkdir -p $(STAGE)/ptable/c $(STAGE)/ptable/docs $(STAGE)/ptable/src
+	$(Q)for f in $(FLAVORS); do \
+		mkdir -p "$(STAGE)/ptable/$$f/libs"; \
+		cp "dist/$$f/ptable.library" "$(STAGE)/ptable/$$f/libs/"; \
 	done
-	@mkdir -p "$(STAGING)/ptable/c" "$(STAGING)/ptable/docs" "$(STAGING)/ptable/src"
-	@cp dist/c/lsptres "$(STAGING)/ptable/c/"
-	@cp dist/docs/*.guide "$(STAGING)/ptable/docs/"
-	@cp src/* "$(STAGING)/ptable/src/"
-	@cp LICENSE "$(STAGING)/ptable/"
-	@cp $(README_NAME) "$(STAGING)/ptable/ptable.readme"
-	@cd "$(STAGING)" && $(LHA) c "$(ARCHIVE_NAME)" ptable >/dev/null
-	@mv "$(STAGING)/$(ARCHIVE_NAME)" .
-	@rm -rf "$(STAGING)"
+	$(Q)cp dist/c/lsptres $(STAGE)/ptable/c/
+	$(Q)cp dist/docs/*.guide $(STAGE)/ptable/docs/
+	$(Q)cp src/* $(STAGE)/ptable/src/
+	$(Q)cp LICENSE $(STAGE)/ptable/
+	$(Q)cp $(README_NAME) $(STAGE)/ptable/ptable.readme
+	$(Q)sed -e "s|@VERSION@|$(VERSION)|" -e "s|@DATE@|$(DATE)|" $(INSTALL)/ptable.head $(INSTALL)/common.inc $(INSTALL)/ptable.inc $(INSTALL)/ptable.tail > $(STAGE)/ptable/Install
+	$(Q)cp -r icons/. $(STAGE)/
+
+# Create the Aminet-compatible LHA release (archive + readme).
+release: check-lha version-readme stage
+	@echo "Creating Aminet release: $(ARCHIVE_NAME)"
+	@rm -f "$(ARCHIVE_NAME)"
+	@cd "$(STAGE)" && $(LHA) c "../../$(ARCHIVE_NAME)" ptable ptable.info >/dev/null
 	@echo "=================================="
 	@echo "Created: $(ARCHIVE_NAME)"
 	@ls -lh "$(ARCHIVE_NAME)"
@@ -229,7 +236,7 @@ test-list-update:
 	$(Q)echo "Updated: $(TESTDIR)/INVENTORY.md"
 
 clean:
-	$(Q)rm -rf dist $(VERSION_INC)
+	$(Q)rm -rf dist build $(VERSION_INC)
 
 distclean: clean
 	$(Q)rm -f ptable*.lha ptable*.readme
