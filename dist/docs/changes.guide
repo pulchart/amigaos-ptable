@@ -10,6 +10,7 @@
 
 @{b}ptable.library release notes@{ub}
 
+    @{"20261008-dev" link 20261008_dev}
     @{"20261007" link 20261007}
     @{"20260930" link 20260930}
     @{"20260911" link 20260911}
@@ -24,6 +25,22 @@
   @{"20260911" link 20260911}
   @{"20260930" link 20260930}
   @{"20261007" link 20261007}
+  @{"20261008-dev" link 20261008_dev}
+
+@endnode
+
+@node 20261008_dev "20261008-dev"
+@{b}20261008-dev@{ub}
+
+@{i}Components in this release@{ui}:
+
+  * @{fg shine}ptable.library 2.2 (03.10.2026)@{fg text}
+  * @{fg shine}lsptres 1.2 (03.10.2026)@{fg text}
+
+TBD
+
+----------------------------------------
+@{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20261007}
 
 @endnode
 
@@ -50,7 +67,7 @@
   * Output lines end in LF alone.
 
 ----------------------------------------
-@{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20260930}
+@{"<< Prev" link 20261008_dev}  @{"Contents" link Main}  @{"Next >>" link 20260930}
 
 @endnode
 
