@@ -7,7 +7,8 @@ _Components in this release_:
 - `lsptres 1.2 (03.10.2026)`
 <!-- COMPONENTS:END -->
 
-TBD
+#### ptable.library 2.3
+- MBR partitions of type 07 are passed to the filesystem handler, like GPT basic data partitions.
 
 ## 20261007
 

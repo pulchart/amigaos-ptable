@@ -28,7 +28,8 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-TBD
+ptable.library 2.3:
+* MBR partitions of type 07 are passed to the filesystem handler, like GPT basic data partitions.
 
 REQUIREMENTS
 ============

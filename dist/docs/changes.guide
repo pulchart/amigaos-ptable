@@ -37,7 +37,9 @@
   * @{fg shine}ptable.library 2.3-dev (26.10.2026)@{fg text} @{i}(new)@{ui}
   * @{fg shine}lsptres 1.2 (03.10.2026)@{fg text}
 
-TBD
+@{b}ptable.library 2.3@{ub}
+  * MBR partitions of type 07 are passed to the filesystem handler, like GPT basic
+    data partitions.
 
 ----------------------------------------
 @{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20261007}
