@@ -149,9 +149,10 @@ _psm_it_no:
 	moveq.l	#1,d1			;Z clear: not listed
 	rts
 
-;-- MBR type bytes: FAT12/16 01/04/06, FAT32 0b/0c, FAT16 LBA 0e;
+;-- MBR type bytes: FAT12/16 01/04/06, FAT32 0b/0c, FAT16 LBA 0e, 07 as
+;   GPT basic data (the handler checks the file system signature);
 ;   extended CHS 05, LBA 0f, Linux 85
-_psm_fat:	dc.b	$01,$04,$06,$0b,$0c,$0e,0
+_psm_fat:	dc.b	$01,$04,$06,$0b,$0c,$0e,$07,0
 _psm_ext:	dc.b	$05,$0f,$85,0
 	even
 

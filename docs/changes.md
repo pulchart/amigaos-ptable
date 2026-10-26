@@ -1,11 +1,21 @@
-## 20261007
+## 20261026-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
+- `ptable.library 2.3-dev (26.10.2026)` _(new)_
+- `lsptres 1.2 (03.10.2026)`
+<!-- COMPONENTS:END -->
+
+#### ptable.library 2.3
+- MBR partitions of type 07 are passed to the filesystem handler, like GPT basic data partitions.
+
+## 20261007
+
+_Components in this release_:
+
 - `ptable.library 2.2 (03.10.2026)` _(new)_
 - `lsptres 1.2 (03.10.2026)` _(new)_
-<!-- COMPONENTS:END -->
 
 #### Install
 - New Installer script.
