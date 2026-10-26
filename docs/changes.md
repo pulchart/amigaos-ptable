@@ -9,6 +9,7 @@ _Components in this release_:
 
 #### ptable.library 2.3
 - MBR partitions of type 07 are passed to the filesystem handler, like GPT basic data partitions.
+- Partitions are published without checking their boot block; the filesystem handler decides.
 
 ## 20261007
 

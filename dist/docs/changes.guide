@@ -40,6 +40,8 @@
 @{b}ptable.library 2.3@{ub}
   * MBR partitions of type 07 are passed to the filesystem handler, like GPT basic
     data partitions.
+  * Partitions are published without checking their boot block; the filesystem
+    handler decides.
 
 ----------------------------------------
 @{"<< Prev" link Main}  @{"Contents" link Main}  @{"Next >>" link 20261007}
