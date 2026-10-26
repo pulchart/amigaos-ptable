@@ -1,9 +1,9 @@
-## 20261008-dev
+## 20261026-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
-- `ptable.library 2.2 (03.10.2026)`
+- `ptable.library 2.3-dev (26.10.2026)` _(new)_
 - `lsptres 1.2 (03.10.2026)`
 <!-- COMPONENTS:END -->
 
