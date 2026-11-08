@@ -5,7 +5,10 @@ The library image runs on the bare amitools Machine. Exec is a fake base whose
 LVO slots trap into Python: memory comes from a guarded heap, lists and
 resources are real 68k structures, and DoIO is served by a mockdev.Disk.
 """
+import atexit
 import re
+import shutil
+import struct
 import tempfile
 from pathlib import Path
 
@@ -17,6 +20,7 @@ import mockdev as md
 from toolchain import assemble
 
 BASE, LIBBASE, EXEC, TASK, STRINGS = 0x10000, 0x38000, 0x60000, 0x3A000, 0x3B000
+EXPBASE, DOSBASE, STATIC = 0x62000, 0x64000, 0x66000
 HEAP, HEAP_END, STACK = 0x100000, 0x700000, 0x90000
 GUARD = b'\xa5' * 16
 RDBL_EXECBASE = 34
@@ -28,6 +32,12 @@ LVO = dict(Forbid=-132, Permit=-138, AllocMem=-198, FreeMem=-210, AddHead=-240,
            OpenResource=-498, RawPutChar=-516, InitSemaphore=-558,
            ObtainSemaphore=-564, ReleaseSemaphore=-570, AttemptSemaphore=-576,
            CacheClearU=-636)
+
+EXP_LVO = dict(AddConfigDev=-30, AddBootNode=-36, AddDosNode=-150)
+DOS_LVO = dict(Delay=-198, UnLockDosList=-660, AttemptLockDosList=-666, RemDosEntry=-672,
+               NextDosEntry=-690)
+EB_MOUNTLIST = 74
+DL_ROOT, RN_INFO, DI_DEVINFO = 34, 24, 4
 
 # IORequest offsets (exec/io.h)
 IO_COMMAND, IO_ERROR, IO_ACTUAL, IO_LENGTH, IO_DATA, IO_OFFSET = 28, 31, 32, 36, 40, 44
@@ -61,6 +71,7 @@ class Build:
 def builds():
     """All four builds, assembled once into a temporary directory."""
     tmp = tempfile.mkdtemp(prefix='ptable-')
+    atexit.register(shutil.rmtree, tmp, True)
     return [Build(cpu, fl, tmp) for cpu in ('68000', '68020') for fl in ('small', 'full')]
 
 
@@ -89,9 +100,23 @@ class Rig:
         self.events, self.text, self.overruns, self.bad_frees = [], [], [], []
         self.forbid, self.delays = 0, 0
         self.attempt_ok = True
+        self.dos_present, self.adddos_ok = False, True
+        self.static = STATIC
         for name, off in LVO.items():
             self.trap(EXEC + off, getattr(self, 'x_' + name,
                                           lambda n=name: self.events.append(n)))
+        for name, off in EXP_LVO.items():
+            self.trap(EXPBASE + off, getattr(self, 'x_' + name))
+        for name, off in DOS_LVO.items():
+            self.trap(DOSBASE + off, getattr(self, 'x_' + name,
+                                             lambda n=name: self.events.append(n)))
+        self.mem.w_block(EXPBASE, bytes(EB_MOUNTLIST + 14))
+        self._init_list(EXPBASE + EB_MOUNTLIST)
+        root, info = DOSBASE + 0x200, DOSBASE + 0x300
+        self.mem.w_block(DOSBASE, bytes(0x400))
+        self.mem.w32(DOSBASE + DL_ROOT, root)
+        self.mem.w32(root + RN_INFO, info >> 2)
+        self.dosinfo = info
         self.trap(self.syms['_bootDelay100ms'], self._delay)
 
     # -- plumbing ---------------------------------------------------------
@@ -198,7 +223,124 @@ class Rig:
         self.d0(1 if self.attempt_ok else 0)
 
     def x_OpenLibrary(self):
-        self.d0(0)
+        name = self.cstr(self.r(9))
+        self.events.append(('OpenLibrary', name))
+        if name == 'expansion.library':
+            self.d0(EXPBASE)
+        elif name == 'dos.library' and self.dos_present:
+            self.d0(DOSBASE)
+        else:
+            self.d0(0)
+
+    def x_CloseLibrary(self):
+        self.events.append(('CloseLibrary', self.r(9)))
+
+    def x_FindName(self):
+        name = self.cstr(self.r(9))
+        self.d0(DOSBASE if name == 'dos.library' and self.dos_present else 0)
+
+    # -- expansion / dos ----------------------------------------------------
+    def _init_list(self, lst):
+        self.mem.w32(lst, lst + 4)
+        self.mem.w32(lst + 4, 0)
+        self.mem.w32(lst + 8, lst)
+
+    def x_AddDosNode(self):
+        node, flags = self.r(8), self.r(1)
+        self.events.append(('AddDosNode', node, flags))
+        if not self.adddos_ok:
+            self.d0(0)
+            return
+        self.link_dos(node)
+        self.d0(1)
+
+    def x_AddBootNode(self):
+        self.events.append(('AddBootNode', self.r(9)))
+        self.link_dos(self.r(9))
+        self.d0(1)
+
+    def x_AddConfigDev(self):
+        self.events.append(('AddConfigDev', self.r(8)))
+
+    def link_dos(self, node):
+        """Put a DeviceNode at the head of the DOS device list."""
+        self.mem.w32(node, self.mem.r32(self.dosinfo + DI_DEVINFO))
+        self.mem.w32(self.dosinfo + DI_DEVINFO, node >> 2)
+
+    def alloc_static(self, size):
+        addr = self.static
+        self.static = (addr + size + 15) & ~15
+        assert self.static < HEAP
+        self.mem.w_block(addr, bytes(size))
+        return addr
+
+    def bstr(self, text):
+        addr = self.alloc_static(len(text) + 2)
+        self.mem.w8(addr, len(text))
+        self.mem.w_block(addr + 1, text.encode())
+        return addr
+
+    def add_static_node(self, name, device, unit, low, high, dostype, surfaces=1, bpt=1):
+        """A hand-mounted DeviceNode with FSSM and envec, on the DOS list."""
+        node = self.alloc_static(44)
+        fssm = self.alloc_static(16)
+        env = self.alloc_static(4 * 17)
+        self.mem.w32(node + 40, self.bstr(name) >> 2)
+        self.mem.w32(node + 28, fssm >> 2)
+        self.mem.w32(fssm, unit)
+        self.mem.w32(fssm + 4, self.bstr(device) >> 2)
+        self.mem.w32(fssm + 8, env >> 2)
+        for i, v in enumerate((16, 128, 0, surfaces, 1, bpt, 2, 0, 0, low, high, 30, 0,
+                               0x1FE00, 0x7FFFFFFE, 0, dostype)):
+            self.mem.w32(env + 4 * i, v & 0xFFFFFFFF)
+        self.link_dos(node)
+        return node
+
+    def dos_nodes(self):
+        """DeviceNodes on the DOS list, newest first."""
+        out, bptr = [], self.mem.r32(self.dosinfo + DI_DEVINFO)
+        while bptr:
+            node = bptr << 2
+            name = self.mem.r32(node + 40) << 2
+            fssm = self.mem.r32(node + 28) << 2
+            env = self.mem.r32(fssm + 8) << 2 if fssm else 0
+            hdlr = self.mem.r32(node + 16) << 2
+            out.append({'addr': node,
+                        'name': bytes(self.mem.r_block(name + 1, self.mem.r8(name))).decode(),
+                        'unit': self.mem.r32(fssm) if fssm else None,
+                        'low': self.mem.r32(env + 4 * 9) if env else None,
+                        'high': self.mem.r32(env + 4 * 10) if env else None,
+                        'dostype': self.mem.r32(env + 4 * 16) if env else None,
+                        'seglist': self.mem.r32(node + 32),
+                        'handler': bytes(self.mem.r_block(hdlr + 1, self.mem.r8(hdlr))).decode()
+                                   if hdlr else None})
+            bptr = self.mem.r32(node)
+        return out
+
+    def add_fs_entry(self, dostype, version, seglist=0x1234):
+        """A FileSystem.resource entry, creating the resource when missing."""
+        eq = self.eq
+        fsr = self.res.get('FileSystem.resource')
+        if not fsr:
+            fsr = self.alloc_static(eq['fsr_Sizeof'])
+            name = self.alloc_static(24)
+            self.mem.w_block(name, b'FileSystem.resource\0')
+            self.mem.w32(fsr + 10, name)
+            self._init_list(fsr + eq['fsr_FileSysEntries'])
+            self.res['FileSystem.resource'] = fsr
+        fse = self.alloc_static(eq['fse_Sizeof'])
+        self.mem.w32(fse + eq['fse_DosType'], dostype)
+        self.mem.w32(fse + eq['fse_Version'], version)
+        self.mem.w32(fse + eq['fse_PatchFlags'], 0x180)
+        self.mem.w32(fse + eq['fse_SegList'], seglist)
+        self.mem.w32(fse + eq['fse_GlobalVec'], 0xFFFFFFFF)
+        lst = fsr + eq['fsr_FileSysEntries']
+        pred = self.mem.r32(lst + 8)
+        self.mem.w32(fse, lst + 4)
+        self.mem.w32(fse + 4, pred)
+        self.mem.w32(pred, fse)
+        self.mem.w32(lst + 8, fse)
+        return fse
 
     def x_RawPutChar(self):
         self.text.append(chr(self.r(0) & 0xFF))
@@ -283,6 +425,15 @@ class Rig:
         self.mem.w_block(STRINGS, device.encode() + b'\0')
         return self.call('ScanPartitions', {9: STRINGS, 0: unit})
 
+    def mount(self, cfg=0, device='test.device', unit=0):
+        self.dos_present = True
+        self.mem.w_block(STRINGS, device.encode() + b'\0')
+        return self.call('MountPartitions', {9: STRINGS, 0: unit, 8: cfg})
+
+    def mark_absent(self, device='test.device', unit=0):
+        self.mem.w_block(STRINGS, device.encode() + b'\0')
+        return self.call('MarkAbsent', {9: STRINGS, 0: unit})
+
     # -- resource view ---------------------------------------------------------
     def resource(self):
         return self.res.get('partition.resource', 0)
@@ -335,6 +486,12 @@ class Rig:
             for row in self.rows():
                 keep.add(row['addr'])
                 keep.add(self.mem.r32(row['addr'] + self.eq['pe_Device']))
+            for row in self.rows():
+                blob = self.mem.r32(row['addr'] + self.eq['pe_BlobPtr'])
+                if blob:
+                    keep.add(blob)
+                    fssm = blob + 44
+                    keep.add(self.mem.r32(fssm + 4) << 2)   # shared device-name BSTR
         fsr = self.res.get('FileSystem.resource', 0)
         if fsr:
             keep.add(fsr)
