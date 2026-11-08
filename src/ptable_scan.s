@@ -64,6 +64,10 @@ _srn_rdsk_next:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.w	#$55AA,510(a0)
 	bne.w	_srn_none		;nothing recognised
+	bsr	_partIsMBR		;slot table well-formed?
+	tst.l	d0
+	beq.w	_srn_none		;boot code or another volume, not a table
+	move.l	BC_BlockBuf(a4),a0
 	cmpi.b	#$EE,446+4(a0)
 	beq.w	_srn_gpt
 	bra.w	_srn_mbr
