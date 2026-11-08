@@ -312,6 +312,7 @@ class Rig:
             out.append({'addr': node,
                         'name': bytes(self.mem.r_block(name + 1, self.mem.r8(name))).decode(),
                         'unit': self.mem.r32(fssm) if fssm else None,
+                        'device': self.mem.r32(fssm + 4) << 2 if fssm else None,
                         'low': self.mem.r32(env + 4 * 9) if env else None,
                         'high': self.mem.r32(env + 4 * 10) if env else None,
                         'dostype': self.mem.r32(env + 4 * 16) if env else None,
@@ -496,8 +497,6 @@ class Rig:
                 blob = self.mem.r32(row['addr'] + self.eq['pe_BlobPtr'])
                 if blob:
                     keep.add(blob)
-                    fssm = blob + 44
-                    keep.add(self.mem.r32(fssm + 4) << 2)   # shared device-name BSTR
         fsr = self.res.get('FileSystem.resource', 0)
         if fsr:
             keep.add(fsr)

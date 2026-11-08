@@ -28,6 +28,7 @@
 ;   [ 60..143] DosEnvec     [144..175] dn_Name BSTR
 ;   [176..207] CONTROL BSTR (de_Control)
 ;   [208..231] handler-path BSTR (dn_Handler, when bound by name)
+;   [232..   ] device-name BSTR (fssm_Device), BC_BlobSize in all
 ; The FileSysEntry patch (handler binding) is applied here, BEFORE
 ; the caller's Add*Node (expansion's FFS auto-attach would otherwise
 ; silently replace a custom handler).
@@ -38,7 +39,14 @@ _actBuildBlob:
 ;   fssm_Device = 0 and the handler would dereference a BSTR at address 0
 	move.l	BC_DevNameBSTR(a4),d0
 	beq.w	_abb_fail
-	move.l	#DN_BLOB_SIZE,d0
+	lsl.l	#2,d0
+	move.l	d0,a0
+	moveq.l	#0,d0
+	move.b	(a0),d0
+	addq.l	#4,d0			;length byte + chars, rounded up to a long
+	and.w	#~3,d0
+	add.l	#DN_BLOB_SIZE,d0
+	move.l	d0,BC_BlobSize(a4)
 	move.l	#MEMF_PUBLIC+MEMF_CLEAR+MEMF_REVERSE,d1
 	move.l	a5,a6
 	jsr	AllocMem(a6)
@@ -103,7 +111,20 @@ _abb_nomname:
 	lsr.l	#2,d0
 	move.l	d0,28(a2)		;dn_Startup = BPTR(FSSM)
 	move.l	BC_Unit(a4),(a1)	;fssm_Unit
-	move.l	BC_DevNameBSTR(a4),4(a1) ;fssm_Device
+	move.l	BC_DevNameBSTR(a4),d0	;device name -> the blob's own BSTR
+	lsl.l	#2,d0
+	move.l	d0,a0
+	move.l	a1,-(sp)
+	lea	DN_BLOB_SIZE(a2),a1
+	move.l	a1,d1
+	lsr.l	#2,d1			;d1 = BPTR of the copy
+	moveq.l	#0,d0
+	move.b	(a0),d0			;length; copy length byte + chars
+_abb_dcp:
+	move.b	(a0)+,(a1)+
+	dbf	d0,_abb_dcp
+	move.l	(sp)+,a1
+	move.l	d1,4(a1)		;fssm_Device
 	lea	DN_ENVEC_OFF(a2),a0
 	move.l	a0,d0
 	lsr.l	#2,d0
@@ -224,7 +245,7 @@ _abb_nofs:
 ;-- no handler for this dostype: free the blob and fail so the caller leaves
 ;   the entry present-only (P---) instead of marking a handler-less node MOUNTED
 	move.l	a2,a1
-	move.l	#DN_BLOB_SIZE,d0
+	move.l	BC_BlobSize(a4),d0
 	move.l	a5,a6
 	jsr	FreeMem(a6)
 	moveq.l	#0,d0
@@ -710,7 +731,7 @@ _acd_dos:
 _acd_reg:
 	move.l	d6,pe_DevNode(a3)
 	move.l	d6,pe_BlobPtr(a3)
-	move.l	#DN_BLOB_SIZE,pe_BlobSize(a3)
+	move.l	BC_BlobSize(a4),pe_BlobSize(a3)
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
 	move.b	#1,BC_HaveNodes(a4)
@@ -720,7 +741,7 @@ _acd_reg:
 _acd_addfail:
 ;-- expansion could not link the node: free the blob, keep the entry published
 	move.l	d6,a1
-	move.l	#DN_BLOB_SIZE,d0
+	move.l	BC_BlobSize(a4),d0
 	move.l	a5,a6
 	jsr	FreeMem(a6)
 	bra.w	_acd_next
@@ -900,8 +921,7 @@ _amo_build:
 	endc
 	move.l	d6,pe_DevNode(a3)
 	move.l	d6,pe_BlobPtr(a3)
-	move.l	#DN_BLOB_SIZE,pe_BlobSize(a3)
-	move.b	#1,BC_HaveNodes(a4)	;the node holds BC_DevNameBSTR
+	move.l	BC_BlobSize(a4),pe_BlobSize(a3)
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
 	addq.l	#1,d7
@@ -909,7 +929,7 @@ _amo_build:
 _amo_addfail:
 ;-- expansion could not link the node: free the blob, keep the entry published
 	move.l	d6,a1
-	move.l	#DN_BLOB_SIZE,d0
+	move.l	BC_BlobSize(a4),d0
 	move.l	a5,a6
 	jsr	FreeMem(a6)
 _amo_next:

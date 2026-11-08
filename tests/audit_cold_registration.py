@@ -19,6 +19,7 @@ from toolchain import ROOT, assemble
 BASE, CTX, RESOURCE, ENTRY, TAIL, BLOB, EXEC, EXP, STACK = (
     0x10000, 0x30000, 0x31000, 0x32000, 0x33000, 0x34000,
     0x60000, 0x70000, 0x90000)
+BLOB_SIZE = 256  # 232 fixed + a 24-byte device-name BSTR
 
 
 def observe(image, cpu_name, flavor, bootable, succeeds):
@@ -40,7 +41,11 @@ def observe(image, cpu_name, flavor, bootable, succeeds):
 
         trap(symbols['_partGetResource'], lambda: result(RESOURCE))
         trap(symbols['_actMatch'], lambda: result(1))
-        trap(symbols['_actBuildBlob'], lambda: result(BLOB))
+        def build_blob():
+            mem.w32(CTX + 188, BLOB_SIZE)  # BC_BlobSize, set by the real builder
+            result(BLOB)
+
+        trap(symbols['_actBuildBlob'], build_blob)
         for name in ('_bootDebug', '_bootDebugBStrR', '_bootDebugPartTail'):
             if name in symbols:
                 trap(symbols[name], lambda: None)
@@ -72,12 +77,12 @@ def observe(image, cpu_name, flavor, bootable, succeeds):
         assert cpu.r_sp() == STACK
         registered = cpu.r_reg(0)
         mounted = bool(mem.r8(ENTRY + 27) & 8)
-        freed = ['FreeMem', BLOB, 232] in events
+        freed = ['FreeMem', BLOB, BLOB_SIZE] in events
         assert registered == int(succeeds) and mounted == succeeds
         if succeeds:
             assert mem.r32(ENTRY + 44) == BLOB
             assert mem.r32(ENTRY + 48) == BLOB
-            assert mem.r32(ENTRY + 52) == 232
+            assert mem.r32(ENTRY + 52) == BLOB_SIZE
         assert freed == (not succeeds), events
         return {'cpu': cpu_name, 'flavor': flavor, 'bootable': bootable,
                 'add_succeeded': succeeds, 'registered': registered,
