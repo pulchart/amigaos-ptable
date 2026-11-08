@@ -93,7 +93,8 @@ _LVOUnregisterPartition	= -66
 ;
 ; RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
 ;   nameBSTR:a0, devNode:a2, flags:d3, control:d4, nodeDosType:d5) -> d0 = 1/0
-;   Exec-only; may wait for PTR_Lock. Match a published device/unit/startLBA;
+;   Exec-only; may wait for PTR_Lock. Match a published device/unit/startLBA
+;   (in the row's blocks, pe_BlockShift);
 ;   blockCount is currently unused (filesystem and partition sizes may differ).
 ;   Record MOUNTED, devNode, flags and nodeDosType (0 = unknown), and copy name
 ;   and CONTROL into pe_MountName/pe_Control, truncated to 31 characters.
@@ -148,9 +149,10 @@ PTR_Layout	= 94
 PTR_EntrySize	= 96
 PTR_Sizeof	= 98
 
-PTR_LAYOUT_V	= 5			;bump on every appended field (or newly
+PTR_LAYOUT_V	= 6			;bump on every appended field (or newly
 					;defined pe_Flags bit); v4 = the policy
-					;bits, v5 = PEB_SHADOW extra-mount rows
+					;bits, v5 = PEB_SHADOW extra-mount rows,
+					;v6 = pe_BlockShift
 
 ;--- PartEntry (one per discovered partition; layout = PTR_LAYOUT_V) -------
 ;
@@ -174,7 +176,9 @@ pe_BlobSize	= 52			;ULONG
 pe_NameB	= 56			;32 bytes embedded BSTR (see naming below)
 pe_Envec	= 88			;84 bytes: TableSize+1 longs (max 21)
 pe_ReadMode	= 172			;UBYTE read command used (PERM_* below)
-;		  173			;(pad)
+pe_BlockShift	= 173			;UBYTE log2 of the bytes per block of
+					;pe_StartLBA/pe_BlockCount (layout 6);
+					;0 = 512, what older publishers wrote
 pe_MountName	= 174			;32 bytes embedded BSTR: real DOS device
 					;name when actually mounted (else empty);
 					;the generated pe_NameB is never overwritten

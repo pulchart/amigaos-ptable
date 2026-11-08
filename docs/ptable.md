@@ -14,6 +14,8 @@ MBR, GPT and flat partitions are published but not registered at cold boot: DOS 
 
 A **flat** row covers a whole medium without a partition table, sized from `TD_GETGEOMETRY` (0 when the device does not report it). When block 0 starts with an Amiga DosType (three letters `A`-`Z` and a byte below `$20`, e.g. `DOS\1`, `PFS\3`, `SFS\0`), the row carries that DosType and its node covers the whole medium, which needs the size. Any other block 0, with or without a FAT boot block or `$55AA`, gives `FAT\0` and the auto-detect node; the handler reads block 0 and decides. Block 0 is an MBR only when every slot status byte is `$00` or `$80` and a slot has a type.
 
+**Block size.** The scan asks the device for its block size (`TD_GETGEOMETRY`) and reads whole blocks of 512, 1024, 2048 or 4096 bytes; a device that reports no size or another one is read in 512-byte blocks. Start and size are published in the device's blocks, and `pe_BlockShift` (layout 6) records the size. An RDB whose `rdb_BlockBytes` differs from the device's block size is not walked and the medium gets no row; a LoadSeg block carries its `SummedLongs` minus five longs of filesystem code.
+
 Registering a partition needs a handler for its filesystem already in `FileSystem.resource`. FAT partitions match any registered `FAT\x` handler, every other filesystem must match its DosType exactly. With no handler the partition stays published but unmounted, listed by `lsptres` as `P----`.
 
 **DOS-time scan and automount.** When a card is inserted after the machine is up, the consumer's mount worker (brought up by `compactflash.automount`) calls `ScanPartitions` to publish the card's partitions, then `MountPartitions` to mount them. On removal it calls `UnmountPartitions` or `MarkAbsent`, depending on the configured policy.
@@ -286,7 +288,7 @@ Notes a consumer needs:
 - `mc_NodeDosType` / `mc_NodeHandler` override that; see [Choosing the filesystem](#choosing-the-filesystem).
 - The DosType a node actually carries is recorded in `pe_NodeDosType`, and is what `lsptres` prints in its `DosType` column for a mounted partition. `pe_DosType` stays the **detected** filesystem, so `Flags`/`CONTROL`/unmount prefix matching is unaffected.
 
-**`partition.resource` layout.** Readers walk `ptr_PartList` under `Forbid()` or take `ptr_Lock`. `OpenResource` cannot negotiate versions, so the only runtime layout signal is the pair of stamps in the header, `ptr_Layout` (currently `PTR_LAYOUT_V = 5`) and `ptr_EntrySize`, plus `pe_Length` per entry. Fields are appended only, never inserted, because `lsptres` and fat95 ship separately-built offset mirrors; a consumer that needs a newer field checks the stamp and degrades if it is older. The full field layout is in [`../src/ptable_pub.i`](../src/ptable_pub.i).
+**`partition.resource` layout.** Readers walk `ptr_PartList` under `Forbid()` or take `ptr_Lock`. `OpenResource` cannot negotiate versions, so the only runtime layout signal is the pair of stamps in the header, `ptr_Layout` (currently `PTR_LAYOUT_V = 6`) and `ptr_EntrySize`, plus `pe_Length` per entry. Fields are appended only, never inserted, because `lsptres` and fat95 ship separately-built offset mirrors; a consumer that needs a newer field checks the stamp and degrades if it is older. The full field layout is in [`../src/ptable_pub.i`](../src/ptable_pub.i).
 
 **Lock order.** `ptr_Lock` is the outer lock, DOS list locks are only ever taken inside it, and a handler started by the library must not call back into a ptable LVO while starting up.
 

@@ -3,8 +3,8 @@
 ;
 ; Parses the MBR (primary slots and the EBR chain) and the GPT primary header
 ; into a caller-supplied buffer of PartRec. Holds no globals:
-; the caller passes a 512-byte block-reader callback and the
-; output buffer. 512-byte sectors are assumed (CF cards).
+; the caller passes a block-reader callback and the output buffer.
+; LBAs are device blocks; the GPT walker takes the block size.
 ;
 ; ptable.library includes this; fat95 reaches it at runtime via
 ; the ScanPartitions LVO (it does not include this file).
@@ -160,8 +160,9 @@ _psm_ext:	dc.b	$05,$0f,$85,0
 ;===========================================================
 ; _partScanGPT - walk the GPT primary header + entry array.
 ;
-; Input : a2 = &PartRec output buffer, a3 = block-reader callback
-;              (d0 = block LBA -> d0 = 0 on success & a0 = &512B
+; Input : d1 = log2 of the block size (9..12),
+;         a2 = &PartRec output buffer, a3 = block-reader callback
+;              (d0 = block LBA -> d0 = 0 on success & a0 = &block
 ;               buffer; preserves d2-d7/a2-a4), a4 = callback context.
 ;              The buffer must stay valid until the next call.
 ; Output: d0 = record count
@@ -169,6 +170,11 @@ _psm_ext:	dc.b	$05,$0f,$85,0
 ;===========================================================
 _partScanGPT:
 	movem.l	d2-d7/a5,-(sp)
+	moveq.l	#1,d0
+	lsl.l	d1,d0
+	subq.l	#1,d0
+	move.l	d0,-(sp)		;12(sp) = block size - 1
+	move.l	d1,-(sp)		;8(sp) = block shift
 	clr.l	-(sp)			;4(sp) = entry block buffer, 0 = none yet
 	clr.l	-(sp)			;0(sp) = its LBA
 	moveq.l	#0,d7			;d7 = record count
@@ -192,7 +198,7 @@ _partScanGPT:
 	move.l	84(a1),d6		;SizeOfPartitionEntry (LE)
 	REVL	d6
 ;-- disk-supplied: accept only >= 128 and a multiple of 128 (UEFI: 128*2^n),
-;   or entries straddle the 512-byte buffer / land on odd addresses
+;   or entries straddle the block buffer / land on odd addresses
 	move.l	d6,d0
 	and.l	#$7F,d0
 	bne.w	_psg_done
@@ -205,8 +211,8 @@ _psg_eloop:
 	bhs.w	_psg_done
 	cmp.l	#100,d2			;PR_PartIndex is a byte and the node name
 	bhs.w	_psg_done		;budgets two digits: entries past 99 are skipped
-;-- byte offset = idx * entrySize; 512-byte sectors -> block = base
-;   + offset>>9, rem = offset & 511
+;-- byte offset = idx * entrySize; block = base + offset >> shift,
+;   rem = offset & (block size - 1)
 	;Overflow ends the scan: later offsets can only increase.
 	ifd	__68020__
 	move.l	d6,d0
@@ -227,10 +233,10 @@ _psg_eloop:
 	bcs.w	_psg_done		;byte offset exceeds 32 bits
 	endif	;__68020__
 	move.l	d0,d3
-	andi.l	#$1ff,d3		;d3 = byte offset within block (kept
+	and.l	12(sp),d3		;d3 = byte offset within block (kept
 					;     across the callback: preserved reg)
-	lsr.l	#8,d0
-	lsr.l	#1,d0			;d0 = offset / 512
+	move.l	8(sp),d1
+	lsr.l	d1,d0			;d0 = offset / block size
 	add.l	d4,d0			;d0 = absolute LBA of the entry block
 	bcs.w	_psg_done		;do not read a wrapped LBA
 	tst.l	4(sp)
@@ -291,7 +297,7 @@ _psg_enext:
 	bra.w	_psg_eloop
 _psg_done:
 	move.l	d7,d0
-	addq.l	#8,sp
+	lea	16(sp),sp
 	movem.l	(sp)+,d2-d7/a5
 	rts
 

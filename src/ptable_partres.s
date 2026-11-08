@@ -186,8 +186,8 @@ _ptl_out:
 	rts
 
 ;===========================================================
-; _psReadLBA: read one 512B block at an arbitrary 32-bit LBA.
-; Doubles as the block-reader callback for _partScanGPT.
+; _psReadLBA: read one device block at a 32-bit LBA; the block-reader
+; callback of the MBR and GPT walkers.
 ;
 ; In : d0 = LBA, a4 = &BootCtx
 ; Out: d0 = 0 on success (nonzero IO_Error otherwise, BC_ScanErr set),
@@ -195,24 +195,12 @@ _ptl_out:
 ; Preserves d2-d7 (valid parts.s callback).
 ;===========================================================
 _psReadLBA:
-	movem.l	d1-d3/a1,-(sp)
-	move.l	d0,d3			;d3 = LBA
-	move.l	d3,d1
-	lsl.l	#8,d1
-	add.l	d1,d1			;d1 = LBA<<9 = low32 byte offset
-	move.l	d3,d0
-	lsr.l	#8,d0
-	lsr.l	#8,d0
-	lsr.l	#7,d0			;d0 = LBA>>23 = high32 byte offset
-	move.l	#RDB_BLOCK_BYTES,d2
-	move.l	BC_BlockBuf(a4),a1
-	bsr	_bootReadBytes64
+	bsr	_bootReadBlock
 	tst.l	d0
 	beq.s	_prl_ok
 	st	BC_ScanErr(a4)
 _prl_ok:
 	move.l	BC_BlockBuf(a4),a0
-	movem.l	(sp)+,d1-d3/a1
 	rts
 
 ;===========================================================
