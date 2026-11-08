@@ -471,8 +471,8 @@ second, means that when a handler later becomes resident the path can
 simply be dropped from the configuration. A path that does not resolve
 leaves the node with no process; nothing is torn down and DOS retries on
 the next reference. The library copies the string, which it does not own
-past the call; a handler path is clamped to 23 characters and a CONTROL
-string to 31.
+past the call; a handler path longer than 23 characters builds no node,
+and a CONTROL string is clamped to 31.
 
 A fixed window does not follow a card swap the way the auto-detect
 scheme does, so it belongs with a teardown detach policy rather than

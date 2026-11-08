@@ -196,7 +196,8 @@ _abb_hcp:
 	move.b	(a0)+,d3
 	beq.s	_abb_hlen
 	cmp.b	#DN_HDLR_MAX,d0
-	bhs.s	_abb_hlen		;clamp: the string is the caller's, not ours
+	bhs.s	_abb_nofs		;longer than the node holds: a cut path
+					;would name another file, so no node
 	move.b	d3,(a1)+
 	addq.b	#1,d0
 	bra.s	_abb_hcp
