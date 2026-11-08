@@ -113,6 +113,7 @@ _LVOUnmountPartitions	= -48
 _LVORegisterPartition	= -54
 _LVOMarkAbsent		= -60
 _LVOUnregisterPartition	= -66
+_LVOSetPartitionFs	= -72
 ;
 ; RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
 ;   nameBSTR:a0, devNode:a2, flags:d3, control:d4, nodeDosType:d5) -> d0 = 1/0
@@ -134,6 +135,14 @@ _LVOUnregisterPartition	= -66
 ;   Clear MOUNTED/INVALID, node/name and recorded mount values; retain scan data.
 ;   A shadow row is freed instead. Does not stop the handler or remove its DOS
 ;   node; use when the handler leaves voluntarily outside a ptable teardown.
+;
+; SetPartitionFs(deviceName:a1, unit:d0, startLBA:d1, devNode:a2, fsName:a0)
+;   -> d0 = 1 set, 0 no match/null node/busy lock
+;   Exec-only, best-effort PTR_Lock, same match as UnregisterPartition. The
+;   registrant records the filesystem it found on its partition, a C string
+;   such as "FAT32" (up to 8 characters kept), in pe_FsName; fsName = 0 when
+;   its volume is gone. RegisterPartition and UnregisterPartition clear it.
+;   Needs a library whose lib_NegSize covers -72.
 ;
 ; MarkAbsent(deviceName:a1, unit:d0) -> d0 = matching entries processed
 ;   Exec-only, best-effort PTR_Lock; return 0 if unavailable. Clear PRESENT and
@@ -175,7 +184,7 @@ PTR_Sizeof	= 98
 PTR_LAYOUT_V	= 6			;bump on every appended field (or newly
 					;defined pe_Flags bit); v4 = the policy
 					;bits, v5 = PEB_SHADOW extra-mount rows,
-					;v6 = pe_BlockShift
+					;v6 = pe_BlockShift, pe_FsName
 
 ;--- PartEntry (one per discovered partition; layout = PTR_LAYOUT_V) -------
 ;
@@ -216,7 +225,9 @@ pe_NodeDosType	= 248			;ULONG mounted node DosType (layout 3), else 0
 					;resolved per mount or RegisterPartition;
 					;pe_DosType remains detected type for
 					;Flags/CONTROL/UNMOUNT prefix matching
-;		  252..259		;reserved for appended fields (zeroed)
+pe_FsName	= 252			;8 bytes filesystem name from the registrant,
+					;NUL-padded, no NUL when 8 long (layout 6);
+					;empty = unknown
 pe_Sizeof	= 260
 
 ;-- pe_ReadMode values (the device read command, see ptable_boot.s probe)

@@ -708,6 +708,8 @@ included.
                     nodeDosType:d5)                                 -54
   MarkAbsent(deviceName:a1, unit:d0)                         -60
   UnregisterPartition(deviceName:a1, unit:d0, startLBA:d1, devNode:a2)  -66
+  SetPartitionFs(deviceName:a1, unit:d0, startLBA:d1, devNode:a2,
+                 fsName:a0)                                         -72
 @{fg text}
 
   @{b}LVO@{ub}                  @{b}Returns in d0@{ub}           @{b}Call from@{ub}                 
@@ -721,6 +723,7 @@ included.
   @{fg shine}RegisterPartition@{fg text}    1 updated, 0 not found  any task, Exec context    
   @{fg shine}MarkAbsent@{fg text}           entries cleared         any task, Exec context    
   @{fg shine}UnregisterPartition@{fg text}  1 cleared, 0 no-op      any task, Exec context    
+  @{fg shine}SetPartitionFs@{fg text}       1 set, 0 no-op          any task, Exec context    
 
 Notes a consumer needs:
 
@@ -736,6 +739,12 @@ Notes a consumer needs:
     the partition is the automount's again; an extra-mount row is unlinked and
     freed. Only the registrant may clear its own entry ( @{fg shine}devNode@{fg text} must match). Like
     @{fg shine}MarkAbsent@{fg text} it only attempts the lock, and skips when a teardown holds it.
+  * @{fg shine}SetPartitionFs@{fg text} lets the registrant record the filesystem it found on its
+    partition as a C string, e.g. @{fg shine}"FAT32"@{fg text} , in @{fg shine}pe_FsName@{fg text} ; up to 8 characters are
+    kept, and @{fg shine}fsName = 0@{fg text} clears it when its volume is gone. It matches like
+    @{fg shine}UnregisterPartition@{fg text} and only attempts the lock. @{fg shine}RegisterPartition@{fg text} and
+    @{fg shine}UnregisterPartition@{fg text} clear the value. A handler checks that the library's
+    @{fg shine}lib_NegSize@{fg text} covers @{fg shine}-72@{fg text} before calling it.
   * @{fg shine}cfg@{fg text} is a @{fg shine}MountCfg@{fg text} (or @{fg shine}0@{fg text} for cold-boot defaults): global @{fg shine}mc_Flags@{fg text} and
     @{fg shine}mc_Control@{fg text} plus a 0-terminated per-dostype override table, resolved by
     @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} , @{fg shine}mc_NodeDosType@{fg text} / @{fg shine}mc_NodeHandler@{fg text} , and the binding

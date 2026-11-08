@@ -471,6 +471,43 @@ def c_bind_old_size(b):
     return (d['handler'], d['seglist']) == (None, 0x1234)
 
 
+# -- filesystem type ----------------------------------------------------------
+def c_fs_type(b):
+    """The registrant records its filesystem name; another node cannot, and a
+    new registration and UnregisterPartition clear it."""
+    from mockexec import STRINGS
+    rig = rig_for(b, im.mbr_disk([(0, 0x0C, 2048, 0x8000)]))
+    with_fat_handler(rig)
+    rig.scan()
+    rig.mount()
+    eq = rig.eq
+    row = rig.rows()[0]
+    node = rig.mem.r32(row['addr'] + eq['pe_DevNode'])
+    name = lambda: bytes(rig.mem.r_block(row['addr'] + eq['pe_FsName'], 8))
+    text = rig.alloc_static(16)
+
+    def set_fs(dev_node, fs):
+        rig.mem.w_block(STRINGS, b'test.device\0')
+        if fs is not None:
+            rig.mem.w_block(text, fs + b'\0')
+        return rig.call('SetPartitionFs', {9: STRINGS, 0: 0, 1: 2048, 10: dev_node,
+                                           8: text if fs is not None else 0})
+    ok = set_fs(node, b'FAT32') == 1 and name() == b'FAT32\0\0\0'
+    other = set_fs(node + 4, b'FAT16') == 0 and name() == b'FAT32\0\0\0'
+    longer = set_fs(node, b'LongerName') == 1 and name() == b'LongerNa'
+    gone = set_fs(node, None) == 1 and name() == bytes(8)
+    bstr = rig.bstr('CF0')
+    set_fs(node, b'exFAT')
+    rig.mem.w_block(STRINGS, b'test.device\0')
+    rig.call('RegisterPartition', {9: STRINGS, 0: 0, 1: 2048, 2: 0x8000, 8: bstr,
+                                   10: node, 3: 0, 4: 0, 5: 0})
+    cleared_reg = name() == bytes(8)
+    set_fs(node, b'FAT12')
+    rig.mem.w_block(STRINGS, b'test.device\0')
+    rig.call('UnregisterPartition', {9: STRINGS, 0: 0, 1: 2048, 10: node})
+    cleared_unreg = name() == bytes(8)
+    return ok and other and longer and gone and cleared_reg and cleared_unreg and clean(rig)
+
 CASES = [
     (None, 'mount mbr', c_mount_mbr), (None, 'mount rdb', c_mount_rdb),
     (None, 'second pass builds nothing', c_remount_same),
@@ -492,6 +529,7 @@ CASES = [
     ('F3', 'swap fat stick to ffs superfloppy', c_swap_fat_ffs),
     ('F3', 'swap to a larger ffs superfloppy', c_swap_ffs_size),
     (None, 'mountcfg of 28 bytes: no rows', c_bind_old_size),
+    (None, 'filesystem name from the registrant', c_fs_type),
     ('D', 'rdb partition bound by path', c_bind_rdb_path),
     ('D', 'rdb row keeps its dostype', c_bind_rdb_no_dostype),
     ('D', 'force: path over filesysentry', c_bind_force),
