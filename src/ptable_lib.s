@@ -58,6 +58,7 @@ InitResident	= -102
 Forbid		= -132
 Permit		= -138
 FindName	= -276
+TypeOfMem	= -534
 AllocMem	= -198
 FreeMem		= -210
 AddHead		= -240

@@ -31,7 +31,7 @@ LVO = dict(Forbid=-132, Permit=-138, AllocMem=-198, FreeMem=-210, AddHead=-240,
            OpenDevice=-444, CloseDevice=-450, DoIO=-456, AddResource=-486,
            OpenResource=-498, RawPutChar=-516, InitSemaphore=-558,
            ObtainSemaphore=-564, ReleaseSemaphore=-570, AttemptSemaphore=-576,
-           CacheClearU=-636)
+           CacheClearU=-636, TypeOfMem=-534)
 
 EXP_LVO = dict(AddConfigDev=-30, AddBootNode=-36, AddDosNode=-150)
 DOS_LVO = dict(Delay=-198, UnLockDosList=-660, AttemptLockDosList=-666, RemDosEntry=-672,
@@ -234,6 +234,10 @@ class Rig:
 
     def x_CloseLibrary(self):
         self.events.append(('CloseLibrary', self.r(9)))
+
+    def x_TypeOfMem(self):
+        addr = self.r(9)
+        self.d0(1 if STATIC <= addr < HEAP_END else 0)
 
     def x_FindName(self):
         name = self.cstr(self.r(9))

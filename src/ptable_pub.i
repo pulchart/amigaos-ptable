@@ -22,6 +22,8 @@
 ;
 ; MountPartitions(deviceName:a1, unit:d0, cfg:a0) -> d0 = mounted count
 ;   Process only. Start present, unmounted entries via AddDosNode(ADNF_STARTPROC).
+;   A DOS-list node on the same device+unit over the entry's blocks is recorded
+;   as its static mount instead, unless mc_UnmFlags has MCUF_MOUNTUSED.
 ;   cfg = MountCfg or 0 for defaults. Resolve Flags/CONTROL by pe_DosType;
 ;   record results in pe_MountFlags/pe_Control and the node's fssm_Flags/de_Control.
 ;   mc_NodeDosType/mc_NodeHandler select the handler for synthesized FAT entries;

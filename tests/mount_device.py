@@ -16,7 +16,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds, STATIC
 
-OPEN = {'F2', 'F3'}
+OPEN = {'F3'}
 
 FAT, MARKER, DOS0, DOS1, DOS3, PFS3 = (0x46415400, 0x464154FF, 0x444F5300, 0x444F5301,
                                        0x444F5303, 0x50465303)
@@ -162,6 +162,59 @@ def c_static_overlap(b):
     return names == ['DH0', 'PFSCF'] and node == static and bool(dh1['flags'] & 8) and clean(rig)
 
 
+def c_static_elsewhere(b):
+    """F2: hand-mounted nodes on another unit, past the partition, on
+    auto-detect, or with a port-handler startup leave the mount alone."""
+    rig = rig_for(b, rdb([('DH0', 2, 101, DOS3)]))
+    rig.add_fs_entry(DOS3, 0x00280001)
+    rig.add_fs_entry(MARKER, 0x00040001)
+    rig.add_static_node('OTHER', 'test.device', 1, 2, 101, DOS3, bpt=32)
+    rig.add_static_node('PAST', 'test.device', 0, 200, 300, DOS3, bpt=32)
+    rig.add_static_node('AUTO', 'test.device', 0, 0, 0xFFFF, MARKER)
+    port = rig.add_static_node('SER', 'test.device', 0, 2, 101, DOS3, bpt=32)
+    rig.mem.w32(port + 28, 1)                  # dn_Startup = 1, not an FSSM
+    rig.scan()
+    n = rig.mount()
+    return n == 1 and len(adds(rig)) == 1 and mounted(rig) == [('DH0', True)] and clean(rig)
+
+
+def c_static_mountused(b):
+    """F2: MCUF_MOUNTUSED lets the mount build its node over a hand mount."""
+    rig = rig_for(b, rdb([('DH0', 2, 101, DOS3)]))
+    rig.add_fs_entry(DOS3, 0x00280001)
+    rig.add_static_node('HAND', 'test.device', 0, 2, 101, DOS3, bpt=32)
+    rig.scan()
+    c = cfg(rig)
+    rig.mem.w32(c + rig.eq['mc_UnmFlags'], 1 << rig.eq['MCUF_MOUNTUSED'])
+    n = rig.mount(c)
+    return n == 1 and len(adds(rig)) == 1 and clean(rig)
+
+
+def c_reuse_fat_only(b):
+    """F1: a same-named LowCyl 0 node of another filesystem is not reused as
+    an auto-detect node; it is the partition's static mount."""
+    rig = rig_for(b, im.mbr_disk([(0, 0x0C, 2048, 0x8000)]))
+    with_fat_handler(rig)
+    node = rig.add_static_node('TESTa0', 'test.device', 0, 0, 0xFFFFF, 0x4D534400)
+    rig.scan()
+    n = rig.mount()
+    row = rig.rows()[0]
+    nb = row['addr'] + rig.eq['pe_MountName']
+    name = bytes(rig.mem.r_block(nb + 1, rig.mem.r8(nb))).decode()
+    return (n == 0 and adds(rig) == [] and rig.mem.r32(row['addr'] + rig.eq['pe_DevNode']) == node
+            and name == 'TESTa0' and clean(rig))
+
+
+def c_reuse_fat(b):
+    """A same-named auto-detect FAT node is reused."""
+    rig = rig_for(b, im.mbr_disk([(0, 0x0C, 2048, 0x8000)]))
+    with_fat_handler(rig)
+    node = rig.add_static_node('TESTa0', 'test.device', 0, 0, 0xFFFFF, MARKER)
+    rig.scan()
+    n = rig.mount()
+    return n == 1 and adds(rig) == [] and rig.mem.r32(rig.rows()[0]['addr'] + rig.eq['pe_DevNode']) == node
+
+
 def c_card_swap(b):
     """F3: a mounted RDB row whose partition changed size on a new card is
     not refreshed in place under its old node."""
@@ -190,6 +243,10 @@ CASES = [
     ('E2', 'rdb dos\\0 mounts unpatched', c_dos0),
     ('E1', 'newer rdb filesystem loaded', c_fshd_newer),
     ('F2', 'static node over a partition', c_static_overlap),
+    (None, 'unrelated hand mounts ignored', c_static_elsewhere),
+    (None, 'mount_used builds over a hand mount', c_static_mountused),
+    (None, 'same-named fat node reused', c_reuse_fat),
+    ('F1', 'same-named other fs not reused', c_reuse_fat_only),
     ('F3', 'card swap with a changed rdb', c_card_swap),
 ]
 
