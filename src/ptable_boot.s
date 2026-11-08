@@ -510,6 +510,7 @@ bs_close1:
 	jsr	CloseLibrary(a6)
 
 bs_cleanup:
+	bsr	_bootFreeDevBSTR
 ;-- a ConfigDev that was never handed to AddConfigDev is still ours
 	move.l	BC_ConfigDev(a4),d0
 	beq.s	bs_nocdfree
@@ -905,6 +906,30 @@ _bbo_out:
 
 
 ;===========================================================
+; _bootFreeDevBSTR: free BC_DevNameBSTR when no node took it
+; (BC_HaveNodes clear).
+; In : a4 = &BootCtx, a5 = ExecBase. Preserves d0-d1/a0-a1/a6.
+;===========================================================
+_bootFreeDevBSTR:
+	movem.l	d0-d1/a0-a1/a6,-(sp)
+	tst.b	BC_HaveNodes(a4)
+	bne.s	_bfdb_out
+	move.l	BC_DevNameBSTR(a4),d0
+	beq.s	_bfdb_out
+	clr.l	BC_DevNameBSTR(a4)
+	lsl.l	#2,d0
+	move.l	d0,a1
+	moveq.l	#0,d0
+	move.b	(a1),d0
+	addq.l	#4,d0			;length byte + chars, rounded up to a long
+	and.w	#~3,d0
+	move.l	a5,a6
+	jsr	FreeMem(a6)
+_bfdb_out:
+	movem.l	(sp)+,d0-d1/a0-a1/a6
+	rts
+
+;===========================================================
 ; _bootMakeExecBSTR: allocate and fill a BSTR copy of a
 ; NUL-terminated C string for FSSM use. ptable.library is
 ; device-agnostic so the caller-supplied name has to be
@@ -916,9 +941,8 @@ _bbo_out:
 ; Input : a0 = NUL-terminated C string, a4 = &BootCtx,
 ;         a6 = ExecBase
 ; Output: d0 = BPTR (already >>2) to BSTR, or 0 on failure
-;         (Allocation is small and intentionally leaked: it must
-;          outlive BootCtx for FSSM consumers to keep using it.
-;          Total leak per scan is name_length + 4 bytes.)
+;         (The nodes built in the call keep it: it outlives BootCtx for
+;          their FSSMs. _bootFreeDevBSTR frees it when no node was built.)
 ;===========================================================
 _bootMakeExecBSTR:
 	movem.l	d1-d3/a0-a2,-(sp)
