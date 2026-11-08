@@ -46,11 +46,10 @@
 @{b}@{u}ptable.library: unified partition-table library@{uu}@{ub}
 
 @{fg shine}ptable.library@{fg text} parses every partition scheme a removable card might
-carry ( @{b}RDB@{ub} , @{b}MBR@{ub} , @{b}GPT@{ub} , and the partition-table-less @{b}flat@{ub} superfloppy,
-a whole-disk FAT volume) and publishes the result into
-@{fg shine}partition.resource@{fg text} . Any driver or handler reads the layout from there
-instead of parsing the card itself, so one parse is shared rather than
-repeated.
+carry ( @{b}RDB@{ub} , @{b}MBR@{ub} , @{b}GPT@{ub} , and @{b}flat@{ub} , a medium without a partition table)
+and publishes the result into @{fg shine}partition.resource@{fg text} . Any driver or handler
+reads the layout from there instead of parsing the card itself, so one
+parse is shared rather than repeated.
 
 You never run it yourself; other components open it. This document
 explains what it does, what you see when it works, and how its behaviour
@@ -82,6 +81,15 @@ lets you boot straight off an RDB-partitioned card in the PCMCIA slot.
 MBR, GPT and flat partitions are published but not registered at cold
 boot: DOS does not exist yet, so their mount configuration cannot be
 read. The DOS-time automount mounts them a moment later.
+
+A @{b}flat@{ub} row covers a whole medium without a partition table, sized from
+@{fg shine}TD_GETGEOMETRY@{fg text} (0 when the device does not report it). When block 0
+starts with an Amiga DosType (three letters @{fg shine}A@{fg text} - @{fg shine}Z@{fg text} and a byte below @{fg shine}$20@{fg text} ,
+e.g. @{fg shine}DOS\1@{fg text} , @{fg shine}PFS\3@{fg text} , @{fg shine}SFS\0@{fg text} ), the row carries that DosType and its node
+covers the whole medium, which needs the size. Any other block 0, with
+or without a FAT boot block or @{fg shine}$55AA@{fg text} , gives @{fg shine}FAT\0@{fg text} and the auto-detect
+node; the handler reads block 0 and decides. Block 0 is an MBR only when
+every slot status byte is @{fg shine}$00@{fg text} or @{fg shine}$80@{fg text} and a slot has a type.
 
 Registering a partition needs a handler for its filesystem already in
 @{fg shine}FileSystem.resource@{fg text} . FAT partitions match any registered @{fg shine}FAT\x@{fg text} handler,
@@ -409,8 +417,7 @@ cold-boot defaults.
 
 @{fg shine}mc_NodeDosType@{fg text} and @{fg shine}mc_NodeHandler@{fg text} decide @{b}which filesystem serves a
 partition@{ub} whose envec this library synthesized, i.e. one from an MBR,
-GPT or flat (whole-disk FAT) card rather than an RDB. They are described
-under @{"Choosing the filesystem" link choosing_the_filesystem} below.
+GPT or flat card rather than an RDB. They are described under @{"Choosing the filesystem" link choosing_the_filesystem} below.
 
 For @{fg shine}compactflash.device@{fg text} these values come from @{fg shine}ENV:cfd.prefs@{fg text} : the @{fg shine}FLAGS@{fg text}
 and @{fg shine}CONTROL@{fg text} keys, global and @{fg shine}_<fs>@{fg text} per filesystem. So to change how
@@ -431,17 +438,18 @@ automount guide ( @{fg shine}automount.guide@{fg text} ).
 @{i}Choosing the filesystem@{ui}
 
 @{fg shine}mc_NodeDosType@{fg text} and @{fg shine}mc_NodeHandler@{fg text} decide which filesystem serves a
-partition that came from an MBR or GPT table or a flat (whole-disk FAT)
-card. They apply to FAT-family entries only, and never to RDB: an RDB
-envec is the card's own, its @{fg shine}de_LowCyl@{fg text} / @{fg shine}de_HighCyl@{fg text} are real cylinders
-against real @{fg shine}de_Surfaces@{fg text} / @{fg shine}de_BlocksPerTrack@{fg text} , and writing block counts
-into those fields would be nonsense.
+partition that came from an MBR or GPT table or a flat card. They apply
+to FAT entries only, and never to RDB: an RDB envec is the card's own,
+its @{fg shine}de_LowCyl@{fg text} / @{fg shine}de_HighCyl@{fg text} are real cylinders against real @{fg shine}de_Surfaces@{fg text} /
+@{fg shine}de_BlocksPerTrack@{fg text} , and writing block counts into those fields would be
+nonsense.
 
   * @{b}Neither set:@{ub} the envec stays exactly as the scan built it and the handler
     comes from @{fg shine}FileSystem.resource@{fg text} . This is the default and is unchanged.
   * @{b}@{fg shine}mc_NodeDosType@{fg text} set:@{ub} the node carries that DosType and gets the partition's own
     block range in @{fg shine}de_LowCyl@{fg text} / @{fg shine}de_HighCyl@{fg text} . The handler still comes from
-    @{fg shine}FileSystem.resource@{fg text} .
+    @{fg shine}FileSystem.resource@{fg text} . A flat row whose size the device did not report keeps
+    the auto-detect envec.
   * @{b}@{fg shine}mc_NodeHandler@{fg text} set:@{ub} the envec is untouched, so auto-detect is preserved; the
     path is used only if @{fg shine}FileSystem.resource@{fg text} has nothing for the node's DosType.
   * @{b}Both set:@{ub} that DosType, that window, and the path as the fallback for the
@@ -594,7 +602,9 @@ partitions:
 of that name already exists and is rebound instead of created, and
 @{fg shine}[PT] mounted as <name>@{fg text} when a handler overlays its own DOS name through
 @{fg shine}RegisterPartition@{fg text} . A whole-disk card prints
-@{fg shine}[PT] whole-disk FAT (superfloppy)@{fg text} in place of a partition-table line.
+@{fg shine}[PT] whole-disk FAT (superfloppy)@{fg text} in place of a partition-table line, or
+@{fg shine}[PT] whole medium, no partition table@{fg text} when block 0 carries @{fg shine}$55AA@{fg text} but
+neither a FAT boot block nor a partition table.
 
 The resulting @{fg shine}partition.resource@{fg text} , listed by @{fg shine}lsptres@{fg text} (columns explained
 in @{"  __PAIRED_2__  " link "lsptres.guide/Main"} ):

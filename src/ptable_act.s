@@ -252,8 +252,7 @@ _actResolveCfg:
 	move.l	mc_Control(a0),d3
 	move.l	mc_Overrides(a0),d4	;override table (0 = none)
 	beq.s	_arc_store
-	move.l	pe_DosType(a3),d0
-	and.l	#$FFFFFF00,d0		;d0 = dostype prefix
+	bsr	_actPrefix		;d0 = dostype prefix
 	move.l	d4,a0			;a0 = override row
 _arc_ov:
 	move.l	ovr_Prefix(a0),d1
@@ -310,19 +309,31 @@ _arc_done:
 	beq.s	_arc_nstore		;cold / no cfg
 	cmp.b	#PES_RDB,pe_Source(a3)
 	beq.s	_arc_nstore
-	move.l	pe_DosType(a3),d3
-	and.l	#$FFFFFF00,d3
+	move.l	d0,d3
+	bsr	_actPrefix
+	exg	d0,d3			;d0 = envec DosType, d3 = prefix
 	cmp.l	#DOSTYPE_FAT,d3
 	bne.s	_arc_nstore
 	move.l	d2,a0
 	move.l	mc_NodeHandler(a0),d1	;path (0 = FileSystem.resource only)
 	move.l	mc_NodeDosType(a0),d3
 	beq.s	_arc_nstore		;no DosType named -> envec stays as scanned
+	tst.l	pe_BlockCount(a3)
+	beq.s	_arc_nstore		;size unknown: no fixed window possible
 	move.l	d3,d0
 _arc_nstore:
 	move.l	d0,pe_NodeDosType(a3)
 	move.l	d1,BC_NodeHandler(a4)
 	movem.l	(sp)+,d0-d4/a0-a1
+	rts
+
+;===========================================================
+; _actPrefix: d0 = the entry's detected DosType prefix (high three bytes).
+; In: a3 = entry.
+;===========================================================
+_actPrefix:
+	move.l	pe_DosType(a3),d0
+	clr.b	d0
 	rts
 
 ;===========================================================
@@ -648,9 +659,9 @@ _aum_policy:
 					;entry for the device+unit (documented API;
 					;a caller wanting keep-everything calls
 					;MarkAbsent instead)
-	move.l	pe_DosType(a3),d5
-	and.l	#$FFFFFF00,d5
 	move.l	d0,a0
+	bsr	_actPrefix
+	move.l	d0,d5
 _aum_pfx:
 	move.l	(a0)+,d0
 	beq.s	_aum_keep		;not in list -> keep handler, mark absent

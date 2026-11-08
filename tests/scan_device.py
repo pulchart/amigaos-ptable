@@ -18,7 +18,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds
 
-OPEN = {'A', 'C1', 'C2', 'C3', 'C4', 'E4', 'G', 'I', 'J-ee', 'J-max', 'J-gpt'}
+OPEN = {'A', 'C1', 'C2', 'C3', 'C4', 'E4', 'I', 'J-ee', 'J-max', 'J-gpt'}
 
 FAT = 0x46415400
 PES_MBR, PES_GPT, PES_RDB, PES_FLAT = 0, 1, 2, 3
@@ -104,6 +104,28 @@ def c_carddisk2048(b):
     disk = md.Disk(im.mbr_disk([(0, 0x0C, 64, 0x1000)], size=2048), bs=2048, profile='carddisk')
     rig = scan(b, disk)
     return [(r['start'], r['count']) for r in rig.rows()] == [(64, 0x1000)] and clean(rig)
+
+
+def c_blank(b):
+    """G: a blank block 0, no signature: one whole-medium FAT row."""
+    rig = scan(b, md.Disk({}, total=0x40000))
+    rows = [(r['source'], r['start'], r['count'], r['dostype']) for r in rig.rows()]
+    return rows == [(PES_FLAT, 0, 0x40000, FAT)] and clean(rig)
+
+
+def c_amiga_flat(b):
+    """G: an FFS superfloppy: a row of its DosType, the node over the medium."""
+    rig = scan(b, md.Disk({0: b'DOS\x01' + bytes(508)}, total=0x1000))
+    rows = [(r['source'], r['start'], r['count'], r['dostype']) for r in rig.rows()]
+    env = rig.rows()[0]['envec'] if rows else []
+    return (rows == [(PES_FLAT, 0, 0x1000, 0x444F5301)]
+            and (env[9], env[10], env[16]) == (0, 0xFFF, 0x444F5301) and clean(rig))
+
+
+def c_amiga_nosize(b):
+    """G: an Amiga DosType row needs the medium size for its window."""
+    rig = scan(b, md.Disk({0: b'DOS\x01' + bytes(508)}, total=0x1000, geometry='error'))
+    return rig.rows() == [] and clean(rig)
 
 
 def c_foreign(b):
@@ -232,7 +254,8 @@ CASES = [
     (None, 'rescan reuses rows', c_rescan),
     ('A', 'gpt 4096-byte device', c_gpt4k), ('A', 'rdb 2048-byte blocks', c_rdb2048),
     ('A', 'cmd-only 2048-byte device', c_carddisk2048),
-    ('G', 'whole medium, no table, no bpb', c_foreign), ('G', 'fat -S 4096 superfloppy', c_fat4096),
+    ('G', 'whole medium, no table, no bpb', c_foreign), (None, 'blank medium: one fat row', c_blank),
+    (None, 'ffs superfloppy row', c_amiga_flat), (None, 'superfloppy of unknown size', c_amiga_nosize), ('G', 'fat -S 4096 superfloppy', c_fat4096),
     ('G1', 'boot code over the slot table', c_bootcode),
     ('C1', 'cmd_read past 4 GiB', c_cmd_high), ('C1', 'transient first read', c_first_fail),
     ('C2', 'part read error keeps rows', c_part_error), ('C3', 'no td_changestate', c_nochangestate),

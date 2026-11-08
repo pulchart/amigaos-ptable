@@ -321,6 +321,30 @@ _pim_no:
 	rts
 
 ;===========================================================
+; _partAmigaType - the DosType an Amiga filesystem writes at the start of
+; its first block: three letters A-Z and a byte below $20 (DOS\1, PFS\3).
+;
+; Input : a0 = &block
+; Output: d0 = that DosType, or 0. Clobbers d1.
+;===========================================================
+_partAmigaType:
+	moveq.l	#2,d1
+_pat_l:
+	move.b	0(a0,d1.w),d0
+	cmp.b	#'A',d0
+	blo.s	_pat_no
+	cmp.b	#'Z',d0
+	bhi.s	_pat_no
+	dbf	d1,_pat_l
+	cmp.b	#$20,3(a0)
+	bhs.s	_pat_no
+	move.l	(a0),d0
+	rts
+_pat_no:
+	moveq.l	#0,d0
+	rts
+
+;===========================================================
 ; _partIsBootBlock - FAT boot-sector sanity gate (rejects NTFS).
 ;
 ; Input : a0 = &block (512 bytes)

@@ -11,10 +11,6 @@
 ;   a4 = &BootCtx, a5 = ExecBase.
 ;===========================================================
 
-;-- superfloppy BPB total-sector fields (little-endian, block 0)
-BPB_TOTAL16	= 19
-BPB_TOTAL32	= 32
-
 ;===========================================================
 ; _scanRun: detect + publish for BC_DevName/BC_Unit.
 ; In : a4 = &BootCtx (unit open), a5 = ExecBase; PTR_Lock held
@@ -58,23 +54,23 @@ _srn_rdsk_next:
 	tst.l	d0
 	bne.w	_srn_out
 	move.l	BC_BlockBuf(a4),a0
+	bsr	_partAmigaType		;an Amiga filesystem's DosType at LBA 0?
+	move.l	d0,d2
+	bne.w	_srn_tagged
+	move.l	BC_BlockBuf(a4),a0
 	bsr	_partIsBootBlock	;FAT BPB straight at LBA 0?
 	tst.l	d0
 	bne.w	_srn_flat
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.w	#$55AA,510(a0)
-	bne.w	_srn_none		;nothing recognised
+	bne.w	_srn_whole		;no partition table
 	bsr	_partIsMBR		;slot table well-formed?
 	tst.l	d0
-	beq.w	_srn_none		;boot code or another volume, not a table
+	beq.w	_srn_whole		;boot code or another volume, not a table
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.b	#$EE,446+4(a0)
 	beq.w	_srn_gpt
 	bra.w	_srn_mbr
-
-_srn_none:
-	PTMSG	dbg_boot_no_rdb		;"[PT] no partition table"
-	bra.w	_srn_out
 
 ;- - RDB: FSHD handler load, then publish each PART block - -
 ;   (a slot already present is refreshed in place via _scanFindSlot
@@ -140,23 +136,26 @@ _srn_pt_loop:
 	beq.w	_srn_out
 	bra.s	_srn_pt_loop
 
-;- - superfloppy: one whole-disk FAT entry - - - - - - - - -
+;- - whole medium: one entry over the device - - - - - - - -
+;   Block 0 with an Amiga DosType gives a row of that DosType over the whole
+;   medium. Any other block 0 without a partition table, FAT boot block or
+;   not, gives one FAT row; the handler bound to the node reads block 0 and
+;   decides.
+_srn_tagged:
+	PTMSG	dbg_pt_tagged
+	bra.s	_srn_pubflat
+_srn_whole:
+	PTMSG	dbg_pt_whole
+	ifd	DEBUG
+	bra.s	_srn_fatflat
+	endc
 _srn_flat:
 	PTMSG	dbg_pt_flat
-;-- a0 = block 0 with a validated FAT BPB; total sectors is the
-;   little-endian word at 19, or the long at 32 when the word is 0
-	moveq.l	#0,d1
-	move.b	BPB_TOTAL16+1(a0),d1
-	lsl.w	#8,d1
-	move.b	BPB_TOTAL16(a0),d1
-	tst.w	d1
-	bne.s	_srn_fl_have
-	move.l	BPB_TOTAL32(a0),d1
-	REVL	d1
-_srn_fl_have:
-	tst.l	d1
-	beq.w	_srn_out
-	bsr	_scanPubFlat		;d1 = total sectors
+_srn_fatflat:
+	move.l	#DOSTYPE_FAT,d2
+_srn_pubflat:
+	bsr	_scanMediumBlocks	;d1 = medium size, 0 = unknown
+	bsr	_scanPubFlat		;d1 = size, d2 = DosType
 	add.l	d0,d7
 	bra.w	_srn_out
 
@@ -394,15 +393,43 @@ _sfr_nb:
 	rts
 
 ;===========================================================
-; _scanPubFlat: publish the superfloppy whole-disk entry.
-; In : d1 = total sectors, a4, a5
+; _scanMediumBlocks: medium size in 512-byte blocks from TD_GETGEOMETRY.
+; In : a4 = &BootCtx (unit open), a5 = ExecBase
+; Out: d1 = blocks, 0 = unknown (no geometry, or another sector size);
+;      clobbers d0
+;===========================================================
+_scanMediumBlocks:
+	moveq.l	#0,d1
+	bsr	_bootGeometry
+	tst.l	d0
+	bne.s	_smb_out
+	move.l	BC_Geometry+DG_SectorSize(a4),d0
+	beq.s	_smb_have		;unset: the driver works in 512-byte blocks
+	cmp.l	#512,d0
+	bne.s	_smb_out
+_smb_have:
+	move.l	BC_Geometry+DG_TotalSectors(a4),d1
+_smb_out:
+	rts
+
+;===========================================================
+; _scanPubFlat: publish the whole-medium entry.
+; In : d1 = size in blocks (0 = unknown), d2 = DosType, a4, a5
 ; Out: d0 = 1 published / 0 failed
 ;===========================================================
 _scanPubFlat:
 	movem.l	d2-d3/a2-a3,-(sp)
 	move.l	d1,d3			;d3 = total sectors
+;-- a row of another DosType has a fixed window, which needs the size
+	move.l	d2,d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_spf_sized
+	tst.l	d3
+	beq.s	_spf_fail
+_spf_sized:
 
-;-- same slot (whole-disk = index 0) already present?  refresh it in place
+;-- same slot (whole medium = index 0) already present?  refresh it in place
 	moveq.l	#0,d0			;slot index 0
 	bsr	_scanFindByIndex
 	tst.l	d0
@@ -430,9 +457,9 @@ _spf_fail:
 	rts
 
 ;===========================================================
-; _scanFillFlat: write the superfloppy whole-disk geometry into an entry.
-; In : a3 = entry, d3 = total sectors, a4, a5. Sets PEB_PRESENT, preserves
-; PEB_MOUNTED; leaves the mount overlay intact.
+; _scanFillFlat: write the whole-medium geometry into an entry.
+; In : a3 = entry, d2 = DosType, d3 = size in blocks, a4, a5. Sets
+; PEB_PRESENT, preserves PEB_MOUNTED; leaves the mount overlay intact.
 ;===========================================================
 _scanFillFlat:
 	clr.l	pe_PartIndex(a3)
@@ -440,18 +467,24 @@ _scanFillFlat:
 ;-- rebuild flags, preserving only PEB_MOUNTED + the policy bits (as
 ;   _scanFillRec does): stale BOOTABLE/NOMOUNT bits from a previous card
 ;   must not survive the refresh
-	move.b	pe_Flags(a3),d2
-	and.b	#(1<<PEB_MOUNTED)|(1<<PEB_KEEPSTATIC)|(1<<PEB_MOUNTUSED),d2
-	or.b	#1<<PEB_PRESENT,d2
-	move.b	d2,pe_Flags(a3)
-	move.l	#DOSTYPE_FAT,pe_DosType(a3)
+	move.b	pe_Flags(a3),d0
+	and.b	#(1<<PEB_MOUNTED)|(1<<PEB_KEEPSTATIC)|(1<<PEB_MOUNTUSED),d0
+	or.b	#1<<PEB_PRESENT,d0
+	move.b	d0,pe_Flags(a3)
+	move.l	d2,pe_DosType(a3)
 	clr.l	pe_StartLBA(a3)
 	move.l	d3,pe_BlockCount(a3)
 	lea	pe_Envec(a3),a0
 	moveq.l	#0,d0			;start
 	move.l	d3,d1			;count
-	move.l	#DOSTYPE_FAT,d2
 	bsr	_scanFillEnvec
+;-- not FAT: the node carries the DosType, LowCyl 0..HighCyl is the medium
+	move.l	d2,d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_sff_name
+	move.l	d2,DE_DOSTYPE*4(a0)
+_sff_name:
 	moveq.l	#0,d0
 	bsr	_scanSynthName
 	rts

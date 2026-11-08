@@ -106,7 +106,8 @@ key continues, Q stops. Redirected output is written in full.
            onwards, GPT entry number, RDB list     
            position.                               
   Src      Partition scheme: @{fg shine}MBR@{fg text} , @{fg shine}GPT@{fg text} , @{fg shine}RDB@{fg text} , or  
-           @{fg shine}FLT@{fg text} (flat / superfloppy).               
+           @{fg shine}FLT@{fg text} (flat: the whole medium, no         
+           partition table).                       
   Pri      Boot priority.                          
   DosType  The DosType the mount uses, as hex.     
            For a mounted partition this is the     

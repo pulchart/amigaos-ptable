@@ -219,7 +219,8 @@ PERM_CMD	= 4			;CMD_READ
 PES_MBR		= 0
 PES_GPT		= 1
 PES_RDB		= 2
-PES_FLAT	= 3			;superfloppy: whole-disk FAT volume
+PES_FLAT	= 3			;whole medium, no partition table: $55AA at
+					;block 0, published as DOSTYPE_FAT
 
 ;-- pe_Flags bit numbers (bset/btst)
 PEB_PRESENT	= 0			;entry valid

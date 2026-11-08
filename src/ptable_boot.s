@@ -251,7 +251,8 @@ PTDEC	macro
 ;     136     4   BC_MountCfg     APTR MountCfg; 0 = cold-boot defaults
 ;     140     4   BC_NodeHandler  resolved handler path for this entry
 ;                                 (0 = FileSystem.resource only)
-;     144   512   block buffer (BC_BlockBuf points here)
+;     144    32   BC_Geometry     TD_GETGEOMETRY result
+;     176   512   block buffer (BC_BlockBuf points here)
 
 BC_ExecBase	= 0
 BC_ExpBase	= 4
@@ -273,7 +274,8 @@ BC_UnmountPrefixes = 132	;ptr to 0-terminated dostype-prefix list (UnmountPartit
 BC_MountCfg	= 136		;APTR MountCfg (MountPartitions); 0 = cold-boot defaults
 BC_NodeHandler	= 140		;APTR resolved handler path C-string for the entry being
 				;mounted (0 = bind from FileSystem.resource only)
-BC_Sizeof	= 144
+BC_Geometry	= 144		;struct DriveGeometry from TD_GETGEOMETRY
+BC_Sizeof	= 176
 
 BC_BUF_BYTES	= 512
 
@@ -326,8 +328,6 @@ dbg_boot_start:
 	dc.b	"[PT] cold boot: scanning for partitions",LF,0
 dbg_boot_no_card:
 	dc.b	"[PT] no card / no media",LF,0
-dbg_boot_no_rdb:
-	dc.b	"[PT] no partition table (not RDB/MBR/GPT/FAT)",LF,0
 dbg_boot_fs_add:
 	dc.b	"[PT] + filesystem handler ",0
 dbg_boot_part_boot:
@@ -661,6 +661,33 @@ _bd_busy:
 _bd_bl:	subq.l	#1,d0
 	bne.s	_bd_bl
 	move.l	(sp)+,a6
+	rts
+
+;===========================================================
+; _bootGeometry: TD_GETGEOMETRY into BC_Geometry.
+; In : a4 = &BootCtx (unit open), a5 = ExecBase
+; Out: d0 = IO_Error, 0 on success. BC_Geometry is cleared first, so fields
+;      a driver leaves unset read as 0.
+;===========================================================
+_bootGeometry:
+	movem.l	d1/a0-a1/a6,-(sp)
+	lea	BC_Geometry(a4),a0
+	moveq.l	#DG_Sizeof/4-1,d1
+_bgeo_clr:
+	clr.l	(a0)+
+	dbf	d1,_bgeo_clr
+	lea	BC_DevIOReq(a4),a1
+	move.w	#TD_GETGEOMETRY,IO_Command(a1)
+	move.l	#DG_Sizeof,IO_Length(a1)
+	lea	BC_Geometry(a4),a0
+	move.l	a0,IO_Data(a1)
+	clr.l	IO_Actual(a1)
+	clr.b	IO_Error(a1)
+	move.l	a5,a6
+	jsr	DoIO(a6)
+	moveq.l	#0,d0
+	move.b	BC_DevIOReq+IO_Error(a4),d0
+	movem.l	(sp)+,d1/a0-a1/a6
 	rts
 
 ;===========================================================

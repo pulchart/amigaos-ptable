@@ -113,15 +113,13 @@ class Walker:
 class Scanner(Walker):
     """Real scanner and parsers; mock geometry, reads, publishing and reconciliation."""
 
+    MEDIUM = 64                         # blocks TD_GETGEOMETRY reports
+
     def __init__(self, image, eq, blocks):
         super().__init__(image, eq, blocks)
-        self.published, self.reconcile = [], []
+        self.published, self.reconcile, self.dostypes = [], [], []
         self.mem.w32(self.CTX + eq['BC_BlockBuf'], BLOCK)
-        # Zeroed geometry describes a direct-access device, not optical. The
-        # helper only exists on a library that knows about optical media; the
-        # dispatch below does not depend on it either way.
-        if '_bootGeometry' in self.syms:
-            self.stub('_bootGeometry', lambda: self.cpu.w_reg(0, 0))
+        self.stub('_bootGeometry', self.geometry)
         self.stub('_bootReadBlock', self._read)
         self.stub('_psReadLBA', self._read)
         self.stub('_scanClearPresent', lambda: self.reconcile.append('clear'))
@@ -144,8 +142,14 @@ class Scanner(Walker):
                                self.mem.r32(entry + self.eq['PR_BlockCount'])))
         self.cpu.w_reg(0, 1)
 
+    def geometry(self):
+        g = self.CTX + self.eq['BC_Geometry']
+        self.mem.w_block(g, struct.pack('>II', 512, self.MEDIUM).ljust(32, b'\0'))
+        self.cpu.w_reg(0, 0)
+
     def publish_flat(self):
         self.published.append(('flat', 0, self.cpu.r_reg(1)))
+        self.dostypes.append(self.cpu.r_reg(2))
         self.cpu.w_reg(0, 1)
 
 
@@ -164,10 +168,12 @@ def scanner_cases(image, eq, check):
     ordinary = mbr([(0, 0x06, 100, 8)])
     gpt = {1: gpt_header(count=1), 2: gpt_entry(MS_BASIC, 200, 207), 200: fat_boot()}
     cases = []
+    # Without $55AA the slot table is not read: the medium is one row.
     for name, sector in (('MBR', ordinary), ('GPT', protective)):
         for signature in (b'\0\0', b'\xaa\x55'):
             cases.append((name + ' bad signature ' + signature.hex(),
-                          {**gpt, 0: sector[:510] + signature, 100: fat_boot()}, []))
+                          {**gpt, 0: sector[:510] + signature, 100: fat_boot()},
+                          [('flat', 0, 64)]))
     cases += [
         ('slot zero protective selects GPT', {**gpt, 0: protective},
          [(eq['PES_GPT'], 200, 8)]),
@@ -184,11 +190,14 @@ def scanner_cases(image, eq, check):
          [(eq['PES_MBR'], 100, 8)]),
         ('partition BPB invalid', {0: ordinary, 100: bytes(510) + b'\x55\xaa'},
          [(eq['PES_MBR'], 100, 8)]),
-        ('empty flat medium not published', {0: fat_boot(total=0)}, []),
+        # The size of a whole-medium row comes from the device, not the BPB.
+        ('flat size from geometry', {0: fat_boot(total=0)}, [('flat', 0, 64)]),
         # A slot table is a partition table only when every status byte is
-        # 00 or 80 and some slot has a type.
-        ('slot status 01 is not a table', {0: mbr([(0x01, 0x0c, 100, 8)]), 100: fat_boot()}, []),
-        ('empty slot table is not a table', {0: mbr([])}, []),
+        # 00 or 80 and some slot has a type; otherwise the medium is one row.
+        ('slot status 01 is not a table', {0: mbr([(0x01, 0x0c, 100, 8)]), 100: fat_boot()},
+         [('flat', 0, 64)]),
+        ('empty slot table is not a table', {0: mbr([])}, [('flat', 0, 64)]),
+        ('no signature, no BPB: one row', {0: bytes(512)}, [('flat', 0, 64)]),
         ('status 80 and 00 slots are a table',
          {0: mbr([(0x80, 0x83, 50, 8), (0, 0x0c, 100, 8)]), 100: fat_boot()},
          [(eq['PES_MBR'], 100, 8)]),
@@ -203,6 +212,23 @@ def scanner_cases(image, eq, check):
             n = w.run('_scanRun', context=w.CTX)
             check('scan ' + name, (n, w.published, w.reconcile),
                   (len(expected), expected, ['clear', 'purge']))
+        finally:
+            w.close()
+
+    # Block 0 with an Amiga DosType gives that DosType; anything else one FAT
+    # row, the handler decides.
+    for name, block, want in (('FAT boot block', fat_boot(), eq['DOSTYPE_FAT']),
+                              ('other volume', bytes(510) + b'\x55\xaa', eq['DOSTYPE_FAT']),
+                              ('blank', bytes(512), eq['DOSTYPE_FAT']),
+                              ('DOS\\1', b'DOS\x01' + bytes(508), 0x444F5301),
+                              ('PFS\\3', b'PFS\x03' + bytes(508), 0x50465303),
+                              ('SFS\\0', b'SFS\x00' + bytes(508), 0x53465300),
+                              ('lower case', b'Dos\x01' + bytes(508), eq['DOSTYPE_FAT']),
+                              ('printable 4th byte', b'DOSX' + bytes(508), eq['DOSTYPE_FAT'])):
+        w = Scanner(image, eq, {0: block})
+        try:
+            w.run('_scanRun', context=w.CTX)
+            check('whole medium DosType, ' + name, w.dostypes, [want])
         finally:
             w.close()
 
