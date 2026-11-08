@@ -922,6 +922,53 @@ _bbo_out:
 
 
 ;===========================================================
+; _bootBStrCopy: copy the BSTR at a0 to a1, length byte included.
+; _bootBStrCopy31: the same, at most 31 characters.
+; Clobbers d0/a0/a1.
+;===========================================================
+_bootBStrCopy31:
+	moveq.l	#31,d0
+	cmp.b	(a0),d0
+	bls.s	_bsc_len
+	move.b	(a0),d0
+_bsc_len:
+	addq.l	#1,a0
+	move.b	d0,(a1)+
+	bra.s	_bsc_next
+_bootBStrCopy:
+	moveq.l	#0,d0
+	move.b	(a0),d0			;length byte + d0 characters
+_bsc_loop:
+	move.b	(a0)+,(a1)+
+_bsc_next:
+	dbra	d0,_bsc_loop
+	rts
+
+;===========================================================
+; _bootDevInfo: first node of the DOS device list, found under Forbid
+; without opening dos.library.
+; In : a6 = ExecBase, Forbid held ; Out: d0 = di_DevInfo BPTR, 0 = no DOS
+; Clobbers d1/a0/a1.
+;===========================================================
+_bootDevInfo:
+	lea	378(a6),a0		;ExecBase LibList
+	lea	DosName(pc),a1
+	jsr	FindName(a6)
+	tst.l	d0
+	beq.s	_bdi_out		;no DOS yet
+	move.l	d0,a0
+	move.l	34(a0),d0		;dl_Root (APTR RootNode)
+	beq.s	_bdi_out
+	move.l	d0,a0
+	move.l	24(a0),d0		;rn_Info (BPTR DosInfo)
+	beq.s	_bdi_out
+	lsl.l	#2,d0
+	move.l	d0,a0
+	move.l	4(a0),d0		;di_DevInfo (BPTR first DosList node)
+_bdi_out:
+	rts
+
+;===========================================================
 ; _bootFreeDevBSTR: free BC_DevNameBSTR; every node carries its own copy.
 ; In : a4 = &BootCtx, a5 = ExecBase. Preserves d0-d1/a0-a1/a6.
 ;===========================================================
@@ -1063,20 +1110,7 @@ _bdn_dup:
 ;   so a cold-only walk misses every mount made since boot. Same Forbid;
 ;   dos.library's base via FindName, no open count for a transient look.
 _bdn_dos:
-	lea	378(a6),a0		;ExecBase LibList
-	lea	DosName(pc),a1
-	jsr	FindName(a6)
-	tst.l	d0
-	beq.s	_bdn_unique		;no DOS yet -> cold phase, eb list was it
-	move.l	d0,a1
-	move.l	34(a1),d0		;dl_Root (APTR RootNode)
-	beq.s	_bdn_unique
-	move.l	d0,a1
-	move.l	24(a1),d0		;rn_Info (BPTR DosInfo)
-	beq.s	_bdn_unique
-	lsl.l	#2,d0
-	move.l	d0,a1
-	move.l	4(a1),d0		;di_DevInfo (BPTR first DosList node)
+	bsr	_bootDevInfo		;d0 = first DosList node (BPTR)
 _bdn_dwalk:
 	tst.l	d0
 	beq.s	_bdn_unique		;list end -> name is unique
@@ -1167,20 +1201,7 @@ _bfn_next:
 ;   same Forbid; dos.library's base comes from FindName (a transient look
 ;   needs no open count).
 _bfn_dos:
-	lea	378(a6),a0		;ExecBase LibList
-	lea	DosName(pc),a1
-	jsr	FindName(a6)
-	tst.l	d0
-	beq.s	_bfn_no2		;no DOS yet -> the eb list was everything
-	move.l	d0,a1
-	move.l	34(a1),d0		;dl_Root (APTR RootNode)
-	beq.s	_bfn_no2
-	move.l	d0,a1
-	move.l	24(a1),d0		;rn_Info (BPTR DosInfo)
-	beq.s	_bfn_no2
-	lsl.l	#2,d0
-	move.l	d0,a1
-	move.l	4(a1),d0		;di_DevInfo (BPTR first DosList node)
+	bsr	_bootDevInfo		;d0 = first DosList node (BPTR)
 _bfn_dwalk:
 	tst.l	d0
 	beq.s	_bfn_no2		;list end -> not found

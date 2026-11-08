@@ -618,21 +618,8 @@ _rm_take:
 ;   generated pe_NameB intact; mark mounted, record devnode
 	move.l	d7,a0
 	lea	pe_MountName(a0),a1
-	moveq.l	#0,d0
-	move.b	(a3),d0			;length byte
-	cmp.b	#31,d0
-	bls.s	_rm_lenok
-	moveq.l	#31,d0
-_rm_lenok:
-	move.b	d0,(a1)+		;clamped length
-	lea	1(a3),a2		;a2 = source chars
-	tst.b	d0
-	beq.s	_rm_nameset
-_rm_ncp:
-	move.b	(a2)+,(a1)+
-	subq.b	#1,d0
-	bne.s	_rm_ncp
-_rm_nameset:
+	move.l	a3,a0
+	bsr	_bootBStrCopy31
 	move.l	d7,a0
 	bset	#PEB_MOUNTED,pe_Flags(a0)
 	move.l	d6,pe_DevNode(a0)
@@ -656,20 +643,8 @@ _rm_nameset:
 	lea	pe_Control(a0),a1
 	move.l	8(sp),d0		;control APTR (0 = none)
 	beq.s	_rm_noctl
-	move.l	d0,a2			;src BSTR
-	moveq.l	#0,d0
-	move.b	(a2)+,d0		;length
-	cmp.b	#31,d0
-	bls.s	_rm_clen
-	moveq.l	#31,d0
-_rm_clen:
-	move.b	d0,(a1)+		;clamped length
-	tst.b	d0
-	beq.s	_rm_unlock
-_rm_ccp:
-	move.b	(a2)+,(a1)+
-	subq.b	#1,d0
-	bne.s	_rm_ccp
+	move.l	d0,a0			;src BSTR
+	bsr	_bootBStrCopy31
 	bra.s	_rm_unlock
 _rm_noctl:
 	clr.b	(a1)			;empty control

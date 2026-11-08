@@ -66,13 +66,7 @@ _actBuildBlob:
 ;-- name BSTR from the entry (publish already clamped to 31)
 	lea	pe_NameB(a3),a0
 	lea	DN_BSTR_OFF(a2),a1
-	moveq.l	#0,d3
-	move.b	(a0),d3
-	addq.l	#1,d3			;length byte + chars
-_abb_ncp:
-	move.b	(a0)+,(a1)+
-	subq.l	#1,d3
-	bne.s	_abb_ncp
+	bsr	_bootBStrCopy
 	lea	DN_BSTR_OFF(a2),a1
 	move.l	a1,d0
 	lsr.l	#2,d0
@@ -96,13 +90,7 @@ _abb_ncp:
 	beq.s	_abb_nomname		;name unchanged -> no pe_MountName
 	lea	DN_BSTR_OFF(a2),a0	;src = actual name BSTR
 	lea	pe_MountName(a3),a1	;dst = pe_MountName
-	moveq.l	#0,d0
-	move.b	(a0),d0			;length byte
-	addq.l	#1,d0			;+ chars
-_abb_nwb:
-	move.b	(a0)+,(a1)+
-	subq.l	#1,d0
-	bne.s	_abb_nwb
+	bsr	_bootBStrCopy
 _abb_nomname:
 
 ;-- FileSysStartupMsg
@@ -118,11 +106,7 @@ _abb_nomname:
 	lea	DN_BLOB_SIZE(a2),a1
 	move.l	a1,d1
 	lsr.l	#2,d1			;d1 = BPTR of the copy
-	moveq.l	#0,d0
-	move.b	(a0),d0			;length; copy length byte + chars
-_abb_dcp:
-	move.b	(a0)+,(a1)+
-	dbf	d0,_abb_dcp
+	bsr	_bootBStrCopy
 	move.l	(sp)+,a1
 	move.l	d1,4(a1)		;fssm_Device
 	lea	DN_ENVEC_OFF(a2),a0
@@ -160,17 +144,11 @@ _abb_nowin:
 
 ;-- CONTROL -> de_Control (only if the resolved pe_Control is non-empty):
 ;   copy the BSTR into the blob, point de_Control at it, raise TableSize >= 18
-	lea	pe_Control(a3),a0
-	moveq.l	#0,d0
-	move.b	(a0),d0			;control length
+	tst.b	pe_Control(a3)		;control length
 	beq.s	_abb_noctrl
 	lea	pe_Control(a3),a0	;src BSTR (len + chars)
 	lea	DN_CTRL_OFF(a2),a1	;dst in blob
-	addq.l	#1,d0			;len byte + chars
-_abb_ccp:
-	move.b	(a0)+,(a1)+
-	subq.l	#1,d0
-	bne.s	_abb_ccp
+	bsr	_bootBStrCopy
 	lea	DN_CTRL_OFF(a2),a1
 	move.l	a1,d0
 	lsr.l	#2,d0			;BPTR
@@ -203,7 +181,7 @@ _abb_fsr:
 	move.l	pe_NodeDosType(a3),d0
 	cmp.l	#$444F5300,d0		;DOS\0: the ROM filesystem serves it, the
 	beq.w	_abb_plain		;node stays unpatched as stock mounts it
-	and.l	#$FFFFFF00,d0
+	clr.b	d0
 	cmp.l	#DOSTYPE_FAT,d0		;FAT is shareable: one registered handler
 					;serves any FAT\x dostype (see ptable_fs.s)
 	bne.s	_abb_path
@@ -431,20 +409,8 @@ _afs_s2:
 _afs_units:
 	move.l	a5,a6
 	jsr	Forbid(a6)
-	lea	378(a6),a0		;ExecBase LibList
-	lea	DosName(pc),a1
-	jsr	FindName(a6)
-	tst.l	d0
-	beq.w	_afs_none
-	move.l	d0,a0
-	move.l	34(a0),d0		;dl_Root
-	beq.w	_afs_none
-	move.l	d0,a0
-	move.l	24(a0),d0		;rn_Info (BPTR DosInfo)
-	beq.w	_afs_none
-	lsl.l	#2,d0
-	move.l	d0,a0
-	move.l	4(a0),d7		;di_DevInfo (BPTR)
+	bsr	_bootDevInfo
+	move.l	d0,d7			;d7 = first DosList node (BPTR)
 _afs_walk:
 	tst.l	d7
 	beq.w	_afs_none
@@ -883,19 +849,7 @@ _amo_create:
 	lsl.l	#2,d0
 	move.l	d0,a0
 	lea	pe_MountName(a3),a1
-	moveq.l	#0,d0
-	move.b	(a0),d0
-	cmp.b	#31,d0
-	bls.s	_amo_snl
-	moveq.l	#31,d0
-_amo_snl:
-	move.b	d0,(a1)+
-	addq.l	#1,a0
-	bra.s	_amo_snt
-_amo_snc:
-	move.b	(a0)+,(a1)+
-_amo_snt:
-	dbra	d0,_amo_snc
+	bsr	_bootBStrCopy31
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
 	ifd	DEBUG
