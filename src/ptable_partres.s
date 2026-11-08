@@ -345,7 +345,9 @@ _partCtxFree:
 ;===========================================================
 ; ScanPartitions(devName:a1, unit:d0, LibBase:a6) -> d0 = published
 ;
-; Publish only: open the unit, run the unified scanner, close.
+; Publish only: open the unit, run the unified scanner, close. The unit is
+; opened and its medium awaited before PTR_Lock is taken, so a slow device
+; does not hold up the other LVOs.
 ; Exec-only; callable from any task context.
 ;===========================================================
 ScanPartitions:
@@ -359,23 +361,19 @@ ScanPartitions:
 	beq.w	_sp_ret0
 	move.l	d0,a4
 
-	bsr	_partLockRes
-	tst.l	d0
-	beq.s	_sp_unlocked
+	moveq.l	#0,d7
 	bsr	_bootOpenUnit
 	tst.l	d0
-	beq.s	_sp_openfail
+	bne.s	_sp_open
+	PTMSG	dbg_pt_open		;"cannot open device (no media?)"
+	bra.s	_sp_close
+_sp_open:
+	bsr	_partLockRes
+	tst.l	d0
+	beq.s	_sp_close
 	bsr	_scanRun
 	move.l	d0,d7
-	bra.s	_sp_done2
-_sp_openfail:
-	PTMSG	dbg_pt_open		;"cannot open device (no media?)"
-	moveq.l	#0,d7
-_sp_done2:
 	bsr	_partUnlockRes
-	bra.s	_sp_close
-_sp_unlocked:
-	moveq.l	#0,d7
 _sp_close:
 	bsr	_bootCloseUnit
 	bsr	_partCtxFree
