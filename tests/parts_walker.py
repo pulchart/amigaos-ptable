@@ -182,7 +182,8 @@ def scanner_cases(image, eq, check):
         ('protective second slot stays MBR',
          {**gpt, 0: mbr([(0, 0x06, 100, 8), (0, 0xee, 1, 1000)]), 100: fat_boot()},
          [(eq['PES_MBR'], 100, 8)]),
-        ('block zero read fails', gpt, []),
+        # An unreadable block 0 leaves the published rows as they are.
+        ('block zero read fails', gpt, [], []),
         ('GPT header read fails', {0: protective, 2: gpt[2], 200: fat_boot()}, []),
         # The partition contents are not examined: the handler decides.
         ('partition unreadable', {0: ordinary}, [(eq['PES_MBR'], 100, 8)]),
@@ -206,12 +207,12 @@ def scanner_cases(image, eq, check):
     flat = bytearray(fat_boot())
     flat[446:510] = protective[446:510]
     cases.append(('flat BPB precedes table bytes', {**gpt, 0: bytes(flat)}, [('flat', 0, 64)]))
-    for name, blocks, expected in cases:
+    for name, blocks, expected, *reconcile in cases:
         w = Scanner(image, eq, blocks)
         try:
             n = w.run('_scanRun', context=w.CTX)
             check('scan ' + name, (n, w.published, w.reconcile),
-                  (len(expected), expected, ['clear', 'purge']))
+                  (len(expected), expected, reconcile[0] if reconcile else ['clear', 'purge']))
         finally:
             w.close()
 

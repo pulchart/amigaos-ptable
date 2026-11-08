@@ -19,11 +19,13 @@
 _scanRun:
 	movem.l	d2-d7/a2-a3/a6,-(sp)
 	moveq.l	#0,d7			;d7 = published count
+	clr.b	BC_ScanErr(a4)
 
-;-- whole-unit reconcile: clear PRESENT for this device+unit; the publishers
-;   below re-set it only on the slots the current card actually has, and
-;   _scanPurge at _srn_out then drops the now-absent ones (keeping mounted)
-	bsr	_scanClearPresent
+;-- whole-unit reconcile: once the medium is classified, PRESENT is cleared
+;   for this device+unit (_scanClearPresent); the publishers re-set it on the
+;   slots the current card has and _scanPurge at _srn_out drops the rest
+;   (keeping mounted). A read error during the walk (BC_ScanErr) skips the
+;   purge: rows the walk did not reach are left as they are, not freed.
 
 ;-- valid RDSK in blocks 0..15?
 	moveq.l	#0,d6
@@ -52,7 +54,7 @@ _srn_rdsk_next:
 	moveq.l	#0,d0
 	bsr	_bootReadBlock
 	tst.l	d0
-	bne.w	_srn_out
+	bne.w	_srn_rderr		;unreadable: the previous state stands
 	move.l	BC_BlockBuf(a4),a0
 	bsr	_partAmigaType		;an Amiga filesystem's DosType at LBA 0?
 	move.l	d0,d2
@@ -111,6 +113,7 @@ _srn_fs_loop:
 _srn_fs_done:
 
 ;-- Phase 2: publish partitions (hop-capped walk)
+	bsr	_scanClearPresent
 	move.l	d5,d3
 	moveq.l	#127,d2
 	moveq.l	#0,d5			;d5 = partition index
@@ -124,7 +127,7 @@ _srn_pt_loop:
 	move.l	d3,d0
 	bsr	_bootReadBlock
 	tst.l	d0
-	bne.w	_srn_out
+	bne.w	_srn_rderr
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#PART_ID,(a0)
 	bne.w	_srn_out
@@ -154,6 +157,7 @@ _srn_flat:
 _srn_fatflat:
 	move.l	#DOSTYPE_FAT,d2
 _srn_pubflat:
+	bsr	_scanClearPresent
 	bsr	_scanMediumBlocks	;d1 = medium size, 0 = unknown
 	bsr	_scanPubFlat		;d1 = size, d2 = DosType
 	add.l	d0,d7
@@ -178,6 +182,10 @@ _srn_gpt:
 	moveq.l	#PES_GPT,d6
 _srn_pubrecs:
 	move.l	d0,d5			;d5 = record count
+	tst.b	BC_ScanErr(a4)		;table not read in full: keep the
+	bne.s	_srn_pr_keep		;rows it did not reach as they are
+	bsr	_scanClearPresent
+_srn_pr_keep:
 	moveq.l	#0,d4			;d4 = record index
 _srn_pr_loop:
 	cmp.l	d5,d4
@@ -192,11 +200,17 @@ _srn_pr_loop:
 _srn_pr_done:
 	lea	(PART_MAX_REC*PR_Sizeof)(sp),sp
 
+	bra.s	_srn_out
+_srn_rderr:
+	st	BC_ScanErr(a4)
 _srn_out:
 ;-- drop slots the current card no longer has (PRESENT still clear after the
 ;   reconcile): mounted ones are kept (shown absent ---M), unmounted
 ;   published-only ones are freed. Preserves d7 (the published count).
+	tst.b	BC_ScanErr(a4)
+	bne.s	_srn_nopurge
 	bsr	_scanPurge
+_srn_nopurge:
 	move.l	d7,d0
 	PTDEC	dbg_pt_recs
 	movem.l	(sp)+,d2-d7/a2-a3/a6

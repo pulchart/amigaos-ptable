@@ -252,7 +252,9 @@ PTDEC	macro
 ;     140     4   BC_NodeHandler  resolved handler path for this entry
 ;                                 (0 = FileSystem.resource only)
 ;     144    32   BC_Geometry     TD_GETGEOMETRY result
-;     176   512   block buffer (BC_BlockBuf points here)
+;     176     1   BC_ScanErr      a read failed during the scan's walk
+;     177     3   (pad to long)
+;     180   512   block buffer (BC_BlockBuf points here)
 
 BC_ExecBase	= 0
 BC_ExpBase	= 4
@@ -275,7 +277,8 @@ BC_MountCfg	= 136		;APTR MountCfg (MountPartitions); 0 = cold-boot defaults
 BC_NodeHandler	= 140		;APTR resolved handler path C-string for the entry being
 				;mounted (0 = bind from FileSystem.resource only)
 BC_Geometry	= 144		;struct DriveGeometry from TD_GETGEOMETRY
-BC_Sizeof	= 176
+BC_ScanErr	= 176		;byte: a read failed during this scan's walk
+BC_Sizeof	= 180
 
 BC_BUF_BYTES	= 512
 
@@ -716,10 +719,11 @@ _bootReadBlock:
 ;
 ; The read command varies by device: modern drivers (compactflash,
 ; scsi.device) take NSCMD_TD_READ64, floppy drivers (mfm.device) only
-; CMD_READ, and old controllers sit in between. On the first read we
-; probe NSCMD_TD_READ64 -> TD_READ64 -> HD_SCSICMD -> CMD_READ, keep the
-; first method that completes a read (any error moves on; CMD_READ is the
-; forced last resort), and cache it in BC_ReadMode for the rest of the scan.
+; CMD_READ, and old controllers sit in between. Until a read succeeds we
+; probe NSCMD_TD_READ64 -> TD_READ64 -> HD_SCSICMD -> CMD_READ and cache the
+; first method that completes a read in BC_ReadMode. A negative IOERR_ code
+; moves to the next method; a positive (device or medium) error is retried
+; once with the same method first. When every method fails nothing is cached.
 ;
 ; Input : d0.l = high32, d1.l = low32, d2.l = bytes,
 ;         a1   = destination, a4 = &BootCtx
@@ -744,10 +748,16 @@ _brb_probe:
 	bsr	_brb_try		;d0 = IO_Error
 	tst.b	d0
 	beq.s	_brb_cache		;this method actually read -> use it
-	cmp.b	#4,d6
-	beq.s	_brb_cache		;CMD_READ is the last resort (cache anyway)
+	bmi.s	_brb_next		;IOERR_: the method does not work here
+	move.l	d6,d0
+	bsr	_brb_try		;device error: once more, same method
+	tst.b	d0
+	beq.s	_brb_cache
+_brb_next:
 	addq.l	#1,d6
-	bra.s	_brb_probe
+	cmp.b	#4,d6
+	bls.s	_brb_probe
+	bra.s	_brb_ret		;all failed: d0 = last error, nothing cached
 _brb_cache:
 	move.b	d6,BC_ReadMode(a4)
 	bra.s	_brb_ret
@@ -770,6 +780,8 @@ _brb_try:
 	cmp.b	#3,d0
 	beq.s	_brt_scsi
 ;-- method 4: CMD_READ (32-bit byte offset; low32 only)
+	tst.l	d3
+	bne.s	_brt_far		;offset beyond its reach
 	move.w	#CMD_READ,IO_Command(a0)
 	move.l	d4,IO_Offset(a0)
 	move.l	d5,IO_Length(a0)
@@ -798,6 +810,9 @@ _brt_doio:
 _brt_err:
 	moveq.l	#0,d0
 	move.b	BC_DevIOReq+IO_Error(a4),d0
+	rts
+_brt_far:
+	move.l	#IOERR_BADADDRESS&$FF,d0
 	rts
 
 ;-- _brb_scsi10: HD_SCSICMD READ(10). a0 = IOReq, d3=hi d4=lo (byte

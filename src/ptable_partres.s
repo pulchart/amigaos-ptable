@@ -188,7 +188,7 @@ _ptl_out:
 ; Doubles as the block-reader callback for _partScanGPT.
 ;
 ; In : d0 = LBA, a4 = &BootCtx
-; Out: d0 = 0 on success (nonzero IO_Error otherwise),
+; Out: d0 = 0 on success (nonzero IO_Error otherwise, BC_ScanErr set),
 ;      a0 = &BC_BlockBuf
 ; Preserves d2-d7 (valid parts.s callback).
 ;===========================================================
@@ -205,6 +205,10 @@ _psReadLBA:
 	move.l	#RDB_BLOCK_BYTES,d2
 	move.l	BC_BlockBuf(a4),a1
 	bsr	_bootReadBytes64
+	tst.l	d0
+	beq.s	_prl_ok
+	st	BC_ScanErr(a4)
+_prl_ok:
 	move.l	BC_BlockBuf(a4),a0
 	movem.l	(sp)+,d1-d3/a1
 	rts
