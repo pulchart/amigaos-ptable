@@ -34,6 +34,10 @@ REVL	macro
 ; Output: d0 = record count
 ; Preserves d2-d7/a2-a6 (a0/a1 scratch).
 ;===========================================================
+	ifne	PART_MAX_REC-100
+	fail	"the index budget of 100 no longer bounds the record count"
+	endc
+
 _partScanMBR:
 	movem.l	d2-d7/a2/a5,-(sp)	;a2 advances as the output cursor
 	moveq.l	#0,d6			;d6 = record count
@@ -42,8 +46,6 @@ _partScanMBR:
 	lea	446(a0),a5		;a5 = &slot 0
 	moveq.l	#0,d4			;d4 = slot index 0..3
 _psm_slot:
-	cmp.l	#PART_MAX_REC,d6
-	bhs.w	_psm_done
 	move.b	4(a5),d0
 	lea	_psm_ext(pc),a1
 	bsr	_psm_intype
@@ -69,9 +71,8 @@ _psm_next:
 	beq.s	_psm_done
 	move.l	d5,d7			;d7 = current EBR LBA
 _psm_ebr:
-	cmp.l	#PART_MAX_REC,d6
-	bhs.s	_psm_done
-	cmp.l	#100,d4			;same two-digit index budget as GPT
+	cmp.l	#100,d4			;same two-digit index budget as GPT;
+					;records never outnumber indexes
 	bhs.s	_psm_done
 	move.l	d7,d0
 	jsr	(a3)
@@ -204,8 +205,6 @@ _psg_eloop:
 	bhs.w	_psg_done
 	cmp.l	#100,d2			;PR_PartIndex is a byte and the node name
 	bhs.w	_psg_done		;budgets two digits: entries past 99 are skipped
-	cmp.l	#PART_MAX_REC,d7
-	bhs.w	_psg_done
 ;-- byte offset = idx * entrySize; 512-byte sectors -> block = base
 ;   + offset>>9, rem = offset & 511
 	;Overflow ends the scan: later offsets can only increase.

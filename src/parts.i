@@ -21,8 +21,9 @@ PRFB_PRESENT	= 0		;record valid
 PRFB_GPT	= 1		;came from a GPT entry (else MBR)
 PRFB_BOOTABLE	= 2		;MBR status byte $80
 
-;-- caller output buffer holds up to this many records
-PART_MAX_REC	= 12
+;-- caller output buffer holds up to this many records: the two-digit
+;   index budget of the synthesized names
+PART_MAX_REC	= 100
 
 ;-- DOSTYPE_FAT lives in ptable_pub.i (public ABI), included first by
 ;   every consumer of this file.

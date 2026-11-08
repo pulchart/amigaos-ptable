@@ -114,12 +114,16 @@ class Scanner(Walker):
     """Real scanner and parsers; mock geometry, reads, publishing and reconciliation."""
 
     MEDIUM = 64                         # blocks TD_GETGEOMETRY reports
+    EXEC, HEAP = 0x50000, 0x60000       # AllocMem/FreeMem for the record buffer
 
     def __init__(self, image, eq, blocks):
         super().__init__(image, eq, blocks)
         self.published, self.reconcile, self.dostypes = [], [], []
+        self.allocs = {}
         self.mem.w32(self.CTX + eq['BC_BlockBuf'], BLOCK)
         self.stub('_bootGeometry', self.geometry)
+        self.trap(self.EXEC - 198, self.alloc_mem)
+        self.trap(self.EXEC - 210, self.free_mem)
         self.stub('_bootReadBlock', self._read)
         self.stub('_psReadLBA', self._read)
         self.stub('_scanClearPresent', lambda: self.reconcile.append('clear'))
@@ -131,9 +135,26 @@ class Scanner(Walker):
                 self.stub(name, lambda: None)
 
     def stub(self, name, fn):
+        self.trap(self.syms[name], fn)
+
+    def trap(self, addr, fn):
         tid = self.m.get_traps().alloc(lambda op, pc: fn())
-        self.mem.w16(self.syms[name], 0xa000 | tid)
-        self.mem.w16(self.syms[name] + 2, 0x4e75)
+        self.mem.w16(addr, 0xa000 | tid)
+        self.mem.w16(addr + 2, 0x4e75)
+
+    def alloc_mem(self):
+        size = self.cpu.r_reg(0)
+        addr = self.HEAP + sum(self.allocs.values())
+        self.allocs[addr] = size
+        self.cpu.w_reg(0, addr)
+
+    def free_mem(self):
+        assert self.allocs.pop(self.cpu.r_reg(9)) == self.cpu.r_reg(0), 'FreeMem size'
+
+    def run(self, name, a0=0, context=0, regs=()):
+        n = super().run(name, a0, context, tuple(regs) + ((13, self.EXEC),))
+        assert not self.allocs, 'record buffer not freed'
+        return n
 
     def publish_record(self):
         entry = self.cpu.r_reg(11)
@@ -428,17 +449,18 @@ def run_suite(cpu, flavour):
                   0xfffffff0: ebr((0, 0x0c, 1, 2), (0, 0x05, 0x20, 50))},
                  [(0xfffffff1, 2, 4)], [0xfffffff0])
 
-        # Three primaries leave slot 3 for the extended one; the logicals fill
-        # the rest, the last taking index 4 + (PART_MAX_REC - 3) - 1.
-        chain = {0: mbr([(0, 0x0c, 10 + i, 1) for i in range(3)] + [(0, 0x0f, 1000, 5000)])}
-        for i in range(eq['PART_MAX_REC']):
+        # Three primaries leave slot 3 for the extended one; the logicals take
+        # indexes 4..99, the two-digit budget of the synthesized names, which
+        # PART_MAX_REC covers.
+        chain = {0: mbr([(0, 0x0c, 10 + i, 1) for i in range(3)] + [(0, 0x0f, 1000, 50000)])}
+        for i in range(120):
             chain[1000 + i * 100] = ebr((0, 0x0c, 10, 1), (0, 0x05, (i + 1) * 100, 50))
         w = Walker(image, eq, chain)
         w.mem.w_block(BLOCK, chain[0])
         n = w.run('_partScanMBR', a0=BLOCK)
-        check('mbr logicals stop at PART_MAX_REC',
-              (n, w.records(n)[-1]['index'], len(w.reads)),
-              (eq['PART_MAX_REC'], eq['PART_MAX_REC'], eq['PART_MAX_REC'] - 3))
+        check('mbr logicals stop at index 99',
+              (n, w.records(n)[-1]['index'], len(w.reads), eq['PART_MAX_REC'] >= n),
+              (3 + 96, 99, 96, True))
         w.close()
 
         # --- GPT, well-formed ----------------------------------------
