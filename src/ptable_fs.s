@@ -43,12 +43,17 @@ _bao_fshd_copy:
 	subq.l	#1,d0
 	bne.s	_bao_fshd_copy
 
-;-- skip if a handler with this DosType already exists
+;-- skip unless the RDB copy is newer than the entry for this DosType (if
+;   any). A newer one goes in front (_bootInsertFSEntry adds at the head,
+;   where the lookups start), as the stock RDB code does.
 	move.l	d2,d0
 	bsr	_bootFindFSEntry
 	tst.l	d0
 	beq.s	_bao_no_dup
-	bra.w	_bao_free_fshd
+	move.l	d0,a0
+	move.l	fse_Version(a0),d0
+	cmp.l	fhb_Version(a3),d0
+	bhs.w	_bao_free_fshd		;resident one is as new or newer
 _bao_no_dup:
 
 ;-- pass 1: count LSEG payload bytes
