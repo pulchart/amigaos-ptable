@@ -37,13 +37,8 @@ _srn_rdsk:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#RDSK_ID,(a0)
 	bne.s	_srn_rdsk_next
-	move.l	rdb_SummedLongs(a0),d1
-	moveq.l	#9,d0			;fields read reach long index 8; 0 would
-	cmp.l	d0,d1			;checksum as valid trivially
-	blo.s	_srn_rdsk_next
-	cmp.l	#128,d1
-	bhi.s	_srn_rdsk_next
-	bsr	_bootChecksum
+	moveq.l	#9,d1			;fields read reach long index 8
+	bsr	_bootBlockOK
 	beq.w	_srn_rdb
 _srn_rdsk_next:
 	addq.l	#1,d6
@@ -105,6 +100,9 @@ _srn_fs_loop:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#FSHD_ID,(a0)
 	bne.s	_srn_fs_done
+	moveq.l	#3,d1
+	bsr	_bootBlockOK
+	bne.s	_srn_fs_done
 	move.l	fhb_Next(a0),d3
 	bsr	_bootAddOneFileSys
 	cmp.l	d3,d6			;self-loop guard
@@ -131,6 +129,9 @@ _srn_pt_loop:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#PART_ID,(a0)
 	bne.w	_srn_out
+	moveq.l	#3,d1
+	bsr	_bootBlockOK
+	bne.w	_srn_out		;torn block: the chain ends here
 	move.l	pb_Next(a0),d3
 	bsr	_scanPubRDB		;d5 = index; buffer = PART block
 	add.l	d0,d7

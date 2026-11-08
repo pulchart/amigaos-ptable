@@ -878,22 +878,29 @@ _brb_scsi10:
 	rts
 
 ;===========================================================
-; _bootChecksum: sum of first d1 longs of buffer (a0).
-; Returns d0 = 0 if checksum valid, nonzero otherwise.
+; _bootBlockOK: RDB block sanity. SummedLongs lies within d1..128 and the
+; first SummedLongs longs of the block add up to zero.
+; In : a0 = block, d1 = fewest summed longs the caller relies on (>= 1)
+; Out: d0 = 0 and Z set when valid
 ;===========================================================
-_bootChecksum:
-	movem.l	d2/a2,-(sp)
+_bootBlockOK:
+	movem.l	d1-d2/a2,-(sp)
+	move.l	4(a0),d2		;SummedLongs
+	cmp.l	d1,d2
+	blo.s	_bbo_bad
+	cmp.l	#RDB_BLOCK_BYTES/4,d2
+	bhi.s	_bbo_bad
 	move.l	a0,a2
 	moveq.l	#0,d0
-	move.l	d1,d2
 	subq.l	#1,d2
-	bmi.s	_bcs_end
-_bcs_loop:
+_bbo_sum:
 	add.l	(a2)+,d0
-	dbra	d2,_bcs_loop
-_bcs_end:
-	movem.l	(sp)+,d2/a2
-	tst.l	d0
+	dbra	d2,_bbo_sum
+	bra.s	_bbo_out
+_bbo_bad:
+	moveq.l	#1,d0
+_bbo_out:
+	movem.l	(sp)+,d1-d2/a2		;Z still from add.l/moveq
 	rts
 
 

@@ -18,7 +18,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds
 
-OPEN = {'A', 'E4', 'I', 'J-ee', 'J-max', 'J-gpt'}
+OPEN = {'A', 'I', 'J-ee', 'J-max', 'J-gpt'}
 
 FAT = 0x46415400
 PES_MBR, PES_GPT, PES_RDB, PES_FLAT = 0, 1, 2, 3
@@ -243,6 +243,22 @@ def c_torn_part(b):
     return [r['name'] for r in rig.rows()] == ['DH0'] and clean(rig)
 
 
+def c_torn_lseg(b):
+    """E4: a filesystem whose LSEG chain has a bad checksum is not loaded."""
+    payload = bytes(range(256)) * 3
+    blocks = im.rdb_disk([('DH0', im.envec(2, 101, 0x50465303), 1)],
+                         fs=(0x50465303, 0x00130002, payload, 128))
+    rig = scan(b, md.Disk(blocks))
+    loaded = [(dt, ver) for _, dt, ver, _ in rig.fs_entries()] == [(0x50465303, 0x00130002)]
+    ok = loaded and clean(rig)
+    lseg = sorted(k for k, v in blocks.items() if v[:4] == b'LSEG')
+    torn = bytearray(blocks[lseg[1]])
+    torn[100] ^= 0x01
+    blocks[lseg[1]] = bytes(torn)
+    rig = scan(b, md.Disk(blocks))
+    return ok and rig.fs_entries() == [] and [r['name'] for r in rig.rows()] == ['DH0'] and clean(rig)
+
+
 def c_rdb_overflow(b):
     """I: an RDB partition whose start does not fit 32 bits is not published."""
     env = im.envec(0x00200000, 0x00200010, 0x444F5303, surfaces=16, bpt=255)
@@ -290,6 +306,7 @@ CASES = [
     ('C1', 'cmd_read past 4 GiB', c_cmd_high), ('C1', 'transient first read', c_first_fail),
     ('C2', 'part read error keeps rows', c_part_error), ('C3', 'no td_changestate', c_nochangestate),
     ('C4', 'open before lock', c_lock_order), ('E4', 'torn part block', c_torn_part),
+    ('E4', 'torn lseg block', c_torn_lseg),
     ('I', 'rdb start overflow', c_rdb_overflow), ('J-ee', 'protective entry in slot 1', c_ee_slot1),
     ('J-max', 'more than 12 logicals', c_max_rec), ('J-gpt', 'gpt entry block read once', c_gpt_reads),
 ]
