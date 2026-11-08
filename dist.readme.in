@@ -5,7 +5,7 @@ Type:         util/libs
 Version:      @VERSION@
 Requires:     AmigaOS 2.0+
 Architecture: m68k-amigaos
-Replaces:     util/libs/ptable.v20260930.lha
+Replaces:     util/libs/ptable.v20261007.lha
 Kurz:         Partitionstabellen-Library
 
 ptable.library is the AmigaOS partition-table library (one place that parses
@@ -28,29 +28,24 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-Install:
+ptable.library 2.3:
+* MBR partitions of type 07 are passed to the filesystem handler, like GPT
+  basic data partitions.
+* A card with FFS, PFS or SFS and no partition table mounts as one volume.
+* Improved partition detection; a card can have up to 100 partitions, was 12.
+* Fewer wrong or missing partitions: boot code at the card start, damaged RDB
+  blocks, read errors and RDB partitions past 2 TB are handled.
+* A newer filesystem in the RDB replaces an older one in ROM, e.g. FFS 45
+  over FFS 40.
+* A partition mounted from DEVS:DOSDrivers under another name is no longer
+  mounted a second time.
+* Card swap: partitions of the old card are no longer mounted for the new one.
+* HANDLER_<fs>, STACK_<fs> and PRI_<fs> in cfd.prefs also apply to RDB
+  partitions. A handler path over 23 characters is refused instead of cut.
+* Fixed a memory leak on every card insert.
 
-* New Installer script.
-* Reworked icon positions.
-
-ptable.library 2.2:
-
-* Fixed SCSI reads for partition detection.
-* Serial debug output ends lines with LF alone.
-
-Tools 'lsptres 1.2':
-
-* Improved paging.
-* Output lines end in LF alone.
-
-WHAT IT DOES
-============
-* Cold-boot RDB autoboot: boot directly from an RDB-partitioned card
-  (requires the library ROM-resident).
-* DOS-time scanning and automount: discover and mount hotplugged
-  RDB/MBR/GPT/flat cards, via the consuming driver.
-* Publishes a shared partition.resource that any driver or handler can read
-  instead of parsing the partition table itself.
+lsptres 1.3:
+* VERBOSE shows the filesystem on each partition, e.g. FAT32 (with fat95 4.2).
 
 REQUIREMENTS
 ============

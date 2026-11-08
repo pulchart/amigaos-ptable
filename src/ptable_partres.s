@@ -32,6 +32,10 @@ dbg_pt_gpt:
 	dc.b	"[PT] GPT partition table",LF,0
 dbg_pt_flat:
 	dc.b	"[PT] whole-disk FAT (superfloppy)",LF,0
+dbg_pt_whole:
+	dc.b	"[PT] whole medium, no partition table",LF,0
+dbg_pt_tagged:
+	dc.b	"[PT] whole medium, Amiga DosType at block 0",LF,0
 dbg_pt_mnt:
 	dc.b	"[PT] mounting partitions",LF,0
 dbg_pt_umnt:
@@ -46,6 +50,8 @@ dbg_pt_die_no:
 	dc.b	"[PT] ACTION_DIE declined, code ",0
 dbg_pt_mounted:
 	dc.b	"[PT] mounted ",0
+dbg_pt_served:
+	dc.b	"[PT] served by hand mount ",0
 dbg_pt_reuse:
 	dc.b	"[PT] reusing handler ",0
 dbg_pt_unmounted:
@@ -120,8 +126,9 @@ _pgr_end:
 ; cfd mount worker, a fat95 auto-detect handler, the cold stage)
 ; cannot interleave scan/publish/act. Lock order: PTR_Lock is the
 ; OUTER lock; DOS list locks are only ever taken inside it.
-; Deadlock-free because the acts only STARTPROC explicit-geometry
-; nodes, whose handler never calls back into a ptable LVO at startup.
+; MountPartitions starts handlers (ADNF_STARTPROC) under it: a handler
+; that calls a ptable LVO before replying to its startup packet
+; deadlocks the caller.
 ;
 ; _partLockRes:   a5 = ExecBase -> d0 = resource (0 = fail, not locked)
 ; _partUnlockRes: a5 = ExecBase; preserves all registers
@@ -180,29 +187,21 @@ _ptl_out:
 	rts
 
 ;===========================================================
-; _psReadLBA: read one 512B block at an arbitrary 32-bit LBA.
-; Doubles as the block-reader callback for _partScanGPT.
+; _psReadLBA: read one device block at a 32-bit LBA; the block-reader
+; callback of the MBR and GPT walkers.
 ;
 ; In : d0 = LBA, a4 = &BootCtx
-; Out: d0 = 0 on success (nonzero IO_Error otherwise),
+; Out: d0 = 0 on success (nonzero IO_Error otherwise, BC_ScanErr set),
 ;      a0 = &BC_BlockBuf
 ; Preserves d2-d7 (valid parts.s callback).
 ;===========================================================
 _psReadLBA:
-	movem.l	d1-d3/a1,-(sp)
-	move.l	d0,d3			;d3 = LBA
-	move.l	d3,d1
-	lsl.l	#8,d1
-	add.l	d1,d1			;d1 = LBA<<9 = low32 byte offset
-	move.l	d3,d0
-	lsr.l	#8,d0
-	lsr.l	#8,d0
-	lsr.l	#7,d0			;d0 = LBA>>23 = high32 byte offset
-	move.l	#RDB_BLOCK_BYTES,d2
-	move.l	BC_BlockBuf(a4),a1
-	bsr	_bootReadBytes64
+	bsr	_bootReadBlock
+	tst.l	d0
+	beq.s	_prl_ok
+	st	BC_ScanErr(a4)
+_prl_ok:
 	move.l	BC_BlockBuf(a4),a0
-	movem.l	(sp)+,d1-d3/a1
 	rts
 
 ;===========================================================
@@ -341,7 +340,9 @@ _partCtxFree:
 ;===========================================================
 ; ScanPartitions(devName:a1, unit:d0, LibBase:a6) -> d0 = published
 ;
-; Publish only: open the unit, run the unified scanner, close.
+; Publish only: open the unit, run the unified scanner, close. The unit is
+; opened and its medium awaited before PTR_Lock is taken, so a slow device
+; does not hold up the other LVOs.
 ; Exec-only; callable from any task context.
 ;===========================================================
 ScanPartitions:
@@ -355,23 +356,19 @@ ScanPartitions:
 	beq.w	_sp_ret0
 	move.l	d0,a4
 
-	bsr	_partLockRes
-	tst.l	d0
-	beq.s	_sp_unlocked
+	moveq.l	#0,d7
 	bsr	_bootOpenUnit
 	tst.l	d0
-	beq.s	_sp_openfail
+	bne.s	_sp_open
+	PTMSG	dbg_pt_open		;"cannot open device (no media?)"
+	bra.s	_sp_close
+_sp_open:
+	bsr	_partLockRes
+	tst.l	d0
+	beq.s	_sp_close
 	bsr	_scanRun
 	move.l	d0,d7
-	bra.s	_sp_done2
-_sp_openfail:
-	PTMSG	dbg_pt_open		;"cannot open device (no media?)"
-	moveq.l	#0,d7
-_sp_done2:
 	bsr	_partUnlockRes
-	bra.s	_sp_close
-_sp_unlocked:
-	moveq.l	#0,d7
 _sp_close:
 	bsr	_bootCloseUnit
 	bsr	_partCtxFree
@@ -427,6 +424,7 @@ MountPartitions:
 	bsr	_partUnlockRes
 
 _mp_closeexp:
+	bsr	_bootFreeDevBSTR
 	move.l	BC_ExpBase(a4),d0
 	beq.s	_mp_free
 	move.l	a5,a6
@@ -539,26 +537,9 @@ RegisterPartition:
 ;   (persistent-handler rebind after a card swap; shadow rows included);
 ;   refresh that row
 	move.l	d5,a0
-	lea	PTR_PartList(a0),a0
-	move.l	(a0),d7			;d7 = first node
-_rm_w1:
-	move.l	d7,a0			;a0 = entry
-	move.l	(a0),d1			;d1 = succ
-	beq.s	_rm_p2			;tail -> no own row yet
-	cmp.l	pe_Unit(a0),d3
-	bne.s	_rm_n1
-	cmp.l	pe_StartLBA(a0),d4
-	bne.s	_rm_n1
-	cmp.l	pe_DevNode(a0),d6	;this registrant's own row?
-	bne.s	_rm_n1
-	move.l	pe_Device(a0),a0	;a0 = entry's device C string
-	move.l	a4,a1			;a1 = wanted device name
-	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
-	tst.l	d0
+	bsr	_partFindReg
+	move.l	d0,d7			;d7 = own row
 	bne.w	_rm_take
-_rm_n1:
-	move.l	d1,d7			;cursor = succ
-	bra.s	_rm_w1
 
 ;-- pass 2, the partition's primary row (shadows skipped): a free row is
 ;   claimed; one MOUNTED by another node is never overlaid (that would
@@ -637,24 +618,13 @@ _rm_take:
 ;   generated pe_NameB intact; mark mounted, record devnode
 	move.l	d7,a0
 	lea	pe_MountName(a0),a1
-	moveq.l	#0,d0
-	move.b	(a3),d0			;length byte
-	cmp.b	#31,d0
-	bls.s	_rm_lenok
-	moveq.l	#31,d0
-_rm_lenok:
-	move.b	d0,(a1)+		;clamped length
-	lea	1(a3),a2		;a2 = source chars
-	tst.b	d0
-	beq.s	_rm_nameset
-_rm_ncp:
-	move.b	(a2)+,(a1)+
-	subq.b	#1,d0
-	bne.s	_rm_ncp
-_rm_nameset:
+	move.l	a3,a0
+	bsr	_bootBStrCopy31
 	move.l	d7,a0
 	bset	#PEB_MOUNTED,pe_Flags(a0)
 	move.l	d6,pe_DevNode(a0)
+	clr.l	pe_FsName(a0)		;until the handler reports it
+	clr.l	pe_FsName+4(a0)
 	moveq.l	#1,d2			;updated
 	ifd	DEBUG
 	lea	dbg_pt_mountedas(pc),a0
@@ -673,20 +643,8 @@ _rm_nameset:
 	lea	pe_Control(a0),a1
 	move.l	8(sp),d0		;control APTR (0 = none)
 	beq.s	_rm_noctl
-	move.l	d0,a2			;src BSTR
-	moveq.l	#0,d0
-	move.b	(a2)+,d0		;length
-	cmp.b	#31,d0
-	bls.s	_rm_clen
-	moveq.l	#31,d0
-_rm_clen:
-	move.b	d0,(a1)+		;clamped length
-	tst.b	d0
-	beq.s	_rm_unlock
-_rm_ccp:
-	move.b	(a2)+,(a1)+
-	subq.b	#1,d0
-	bne.s	_rm_ccp
+	move.l	d0,a0			;src BSTR
+	bsr	_bootBStrCopy31
 	bra.s	_rm_unlock
 _rm_noctl:
 	clr.b	(a1)			;empty control
@@ -755,6 +713,41 @@ _ma_unlocked:
 	rts
 
 ;===========================================================
+; _partFindReg: the row registered by devNode d6 for device a4 (C string),
+; unit d3, start block d4. Caller holds PTR_Lock.
+; In : a0 = resource ; Out: d0 = entry or 0. Preserves d1-d7/a0-a6.
+;===========================================================
+_partFindReg:
+	movem.l	d1/a0-a2,-(sp)
+	lea	PTR_PartList(a0),a2
+	move.l	(a2),a2			;a2 = first node
+_pfr_walk:
+	move.l	(a2),d1			;d1 = succ
+	beq.s	_pfr_none		;tail -> not found
+	cmp.l	pe_Unit(a2),d3
+	bne.s	_pfr_next
+	cmp.l	pe_StartLBA(a2),d4
+	bne.s	_pfr_next
+	cmp.l	pe_DevNode(a2),d6	;only the entry's own registrant
+	bne.s	_pfr_next
+	move.l	pe_Device(a2),a0	;a0 = entry's device C string
+	move.l	a4,a1			;a1 = wanted device name
+	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
+	tst.l	d0
+	bne.s	_pfr_hit
+_pfr_next:
+	move.l	d1,a2
+	bra.s	_pfr_walk
+_pfr_hit:
+	move.l	a2,d0
+	bra.s	_pfr_out
+_pfr_none:
+	moveq.l	#0,d0
+_pfr_out:
+	movem.l	(sp)+,d1/a0-a2
+	rts
+
+;===========================================================
 ; UnregisterPartition(deviceName: a1, unit: d0, startLBA: d1,
 ;                     devNode: a2)  -> d0 = 1 cleared / 0 not found or busy
 ; Inverse of RegisterPartition, for a handler leaving voluntarily
@@ -779,23 +772,9 @@ UnregisterPartition:
 	tst.l	d0
 	beq.w	_ur_unlocked
 	move.l	d0,a0
-	lea	PTR_PartList(a0),a0
-	move.l	(a0),d7			;d7 = first node
-_ur_walk:
-	move.l	d7,a0			;a0 = entry
-	move.l	(a0),d1			;d1 = succ
-	beq.w	_ur_unlock		;tail -> not found
-	cmp.l	pe_Unit(a0),d3
-	bne.w	_ur_next
-	cmp.l	pe_StartLBA(a0),d4
-	bne.w	_ur_next
-	cmp.l	pe_DevNode(a0),d6	;only the entry's own registrant
-	bne.w	_ur_next
-	move.l	pe_Device(a0),a0	;a0 = entry's device C string
-	move.l	a4,a1			;a1 = wanted device name
-	bsr	_psStrEq		;d0=1/0; preserves d1-d7,a2-a6
-	tst.l	d0
-	beq.w	_ur_next
+	bsr	_partFindReg
+	move.l	d0,d7			;d7 = entry
+	beq.w	_ur_unlock
 ;-- a shadow row was this mount's own bookkeeping: unlink and free it
 	move.l	d7,a0
 	btst	#PEB_SHADOW,pe_Flags(a0)
@@ -815,7 +794,7 @@ _ur_walk:
 	jsr	Permit(a6)
 	move.l	d7,a0
 	bsr	_psFreeEntry
-	bra.w	_ur_unlock
+	bra.s	_ur_unlock
 
 ;-- clear the mount overlay; the published scan data stays
 _ur_clear:
@@ -827,6 +806,8 @@ _ur_clear:
 	clr.l	pe_MountFlags(a0)
 	clr.b	pe_Control(a0)
 	clr.l	pe_NodeDosType(a0)
+	clr.l	pe_FsName(a0)
+	clr.l	pe_FsName+4(a0)
 	moveq.l	#1,d2
 	ifd	DEBUG
 	lea	dbg_pt_unreg(pc),a0
@@ -835,13 +816,55 @@ _ur_clear:
 	lea	pe_NameB(a0),a0
 	bsr	_bootDebugBStr
 	endc
-	bra.s	_ur_unlock
-_ur_next:
-	move.l	d1,d7			;cursor = succ
-	bra.w	_ur_walk
 _ur_unlock:
 	bsr	_partUnlockRes
 _ur_unlocked:
+	move.l	d2,d0
+	movem.l	(sp)+,d2-d7/a2-a6
+	rts
+
+;===========================================================
+; SetPartitionFs(deviceName: a1, unit: d0, startLBA: d1, devNode: a2,
+;                fsName: a0) -> d0 = 1 set / 0 not found or busy
+; The registrant records the filesystem it found on its partition, up to
+; 8 characters of the C string fsName (0 = none, its volume is gone).
+; Same match and best-effort lock as UnregisterPartition.
+; a6 = library base. Exec-only.
+;===========================================================
+SetPartitionFs:
+	movem.l	d2-d7/a2-a6,-(sp)
+	move.l	d0,d3			;d3 = unit
+	move.l	d1,d4			;d4 = startLBA
+	move.l	a0,a3			;a3 = filesystem name (0 = none)
+	move.l	a1,a4			;a4 = device name (C string)
+	move.l	a2,d6			;d6 = devNode
+	move.l	RDBL_ExecBase(a6),a5
+	moveq.l	#0,d2			;d2 = result
+	tst.l	d6
+	beq.s	_sf_unlocked
+	bsr	_partTryLockRes
+	tst.l	d0
+	beq.s	_sf_unlocked
+	move.l	d0,a0
+	bsr	_partFindReg
+	tst.l	d0
+	beq.s	_sf_unlock
+	move.l	d0,a0
+	lea	pe_FsName(a0),a1
+	clr.l	(a1)
+	clr.l	4(a1)
+	moveq.l	#1,d2
+	move.l	a3,d0
+	beq.s	_sf_unlock		;no name: left empty
+	moveq.l	#8-1,d1
+_sf_copy:
+	move.b	(a3)+,d0
+	beq.s	_sf_unlock
+	move.b	d0,(a1)+
+	dbf	d1,_sf_copy
+_sf_unlock:
+	bsr	_partUnlockRes
+_sf_unlocked:
 	move.l	d2,d0
 	movem.l	(sp)+,d2-d7/a2-a6
 	rts

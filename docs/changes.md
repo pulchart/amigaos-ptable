@@ -1,11 +1,34 @@
-## 20261007
+## 20261108-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
+- `ptable.library 2.3-dev (08.11.2026)` _(new)_
+- `lsptres 1.3-dev (08.11.2026)` _(new)_
+<!-- COMPONENTS:END -->
+
+#### ptable.library 2.3
+- MBR partitions of type 07 are passed to the filesystem handler, like GPT basic data partitions.
+- A card with FFS, PFS or SFS and no partition table mounts as one volume.
+- Improved partition detection; a card can have up to 100 partitions, was 12.
+- Fewer wrong or missing partitions: boot code at the card start, damaged RDB blocks, read errors and RDB partitions past 2 TB are handled.
+- A newer filesystem in the RDB replaces an older one in ROM, e.g. FFS 45 over FFS 40.
+- A partition mounted from `DEVS:DOSDrivers` under another name is no longer mounted a second time.
+- Card swap: partitions of the old card are no longer mounted for the new one.
+- `HANDLER_<fs>`, `STACK_<fs>` and `PRI_<fs>` in `cfd.prefs` also apply to RDB partitions. A handler path over 23 characters is refused instead of cut.
+- Fixed a memory leak on every card insert.
+
+#### Tools
+
+##### 'lsptres 1.3'
+- `VERBOSE` shows the filesystem on each partition, e.g. `FAT32` (with fat95 4.2).
+
+## 20261007
+
+_Components in this release_:
+
 - `ptable.library 2.2 (03.10.2026)` _(new)_
 - `lsptres 1.2 (03.10.2026)` _(new)_
-<!-- COMPONENTS:END -->
 
 #### Install
 - New Installer script.

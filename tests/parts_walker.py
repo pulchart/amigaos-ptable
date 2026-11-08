@@ -80,6 +80,7 @@ class Walker:
     def run(self, name, a0=0, context=0, regs=()):
         for i in range(16):
             self.cpu.w_reg(i, 0)
+        self.cpu.w_reg(1, 9)            # d1 = block shift, GPT only: 512 bytes
         self.cpu.w_reg(8, a0)           # a0 = loaded block, MBR only
         self.cpu.w_reg(10, BUF)         # a2 = output buffer
         self.cpu.w_reg(11, CB)          # a3 = block reader
@@ -113,15 +114,17 @@ class Walker:
 class Scanner(Walker):
     """Real scanner and parsers; mock geometry, reads, publishing and reconciliation."""
 
+    MEDIUM = 64                         # blocks TD_GETGEOMETRY reports
+    EXEC, HEAP = 0x50000, 0x60000       # AllocMem/FreeMem for the record buffer
+
     def __init__(self, image, eq, blocks):
         super().__init__(image, eq, blocks)
-        self.published, self.reconcile = [], []
+        self.published, self.reconcile, self.dostypes = [], [], []
+        self.allocs = {}
         self.mem.w32(self.CTX + eq['BC_BlockBuf'], BLOCK)
-        # Zeroed geometry describes a direct-access device, not optical. The
-        # helper only exists on a library that knows about optical media; the
-        # dispatch below does not depend on it either way.
-        if '_bootGeometry' in self.syms:
-            self.stub('_bootGeometry', lambda: self.cpu.w_reg(0, 0))
+        self.stub('_bootGeometry', self.geometry)
+        self.trap(self.EXEC - 198, self.alloc_mem)
+        self.trap(self.EXEC - 210, self.free_mem)
         self.stub('_bootReadBlock', self._read)
         self.stub('_psReadLBA', self._read)
         self.stub('_scanClearPresent', lambda: self.reconcile.append('clear'))
@@ -133,9 +136,26 @@ class Scanner(Walker):
                 self.stub(name, lambda: None)
 
     def stub(self, name, fn):
+        self.trap(self.syms[name], fn)
+
+    def trap(self, addr, fn):
         tid = self.m.get_traps().alloc(lambda op, pc: fn())
-        self.mem.w16(self.syms[name], 0xa000 | tid)
-        self.mem.w16(self.syms[name] + 2, 0x4e75)
+        self.mem.w16(addr, 0xa000 | tid)
+        self.mem.w16(addr + 2, 0x4e75)
+
+    def alloc_mem(self):
+        size = self.cpu.r_reg(0)
+        addr = self.HEAP + sum(self.allocs.values())
+        self.allocs[addr] = size
+        self.cpu.w_reg(0, addr)
+
+    def free_mem(self):
+        assert self.allocs.pop(self.cpu.r_reg(9)) == self.cpu.r_reg(0), 'FreeMem size'
+
+    def run(self, name, a0=0, context=0, regs=()):
+        n = super().run(name, a0, context, tuple(regs) + ((13, self.EXEC),))
+        assert not self.allocs, 'record buffer not freed'
+        return n
 
     def publish_record(self):
         entry = self.cpu.r_reg(11)
@@ -144,8 +164,14 @@ class Scanner(Walker):
                                self.mem.r32(entry + self.eq['PR_BlockCount'])))
         self.cpu.w_reg(0, 1)
 
+    def geometry(self):
+        g = self.CTX + self.eq['BC_Geometry']
+        self.mem.w_block(g, struct.pack('>II', 512, self.MEDIUM).ljust(32, b'\0'))
+        self.cpu.w_reg(0, 0)
+
     def publish_flat(self):
         self.published.append(('flat', 0, self.cpu.r_reg(1)))
+        self.dostypes.append(self.cpu.r_reg(2))
         self.cpu.w_reg(0, 1)
 
 
@@ -164,46 +190,80 @@ def scanner_cases(image, eq, check):
     ordinary = mbr([(0, 0x06, 100, 8)])
     gpt = {1: gpt_header(count=1), 2: gpt_entry(MS_BASIC, 200, 207), 200: fat_boot()}
     cases = []
+    # Without $55AA the slot table is not read: the medium is one row.
     for name, sector in (('MBR', ordinary), ('GPT', protective)):
         for signature in (b'\0\0', b'\xaa\x55'):
             cases.append((name + ' bad signature ' + signature.hex(),
-                          {**gpt, 0: sector[:510] + signature, 100: fat_boot()}, []))
+                          {**gpt, 0: sector[:510] + signature, 100: fat_boot()},
+                          [('flat', 0, 64)]))
     cases += [
         ('slot zero protective selects GPT', {**gpt, 0: protective},
          [(eq['PES_GPT'], 200, 8)]),
         ('ordinary selects MBR despite GPT header', {**gpt, 0: ordinary, 100: fat_boot()},
          [(eq['PES_MBR'], 100, 8)]),
-        ('protective second slot stays MBR',
+        ('protective second slot selects GPT',
          {**gpt, 0: mbr([(0, 0x06, 100, 8), (0, 0xee, 1, 1000)]), 100: fat_boot()},
-         [(eq['PES_MBR'], 100, 8)]),
-        ('block zero read fails', gpt, []),
+         [(eq['PES_GPT'], 200, 8)]),
+        # An unreadable block 0 leaves the published rows as they are.
+        ('block zero read fails', gpt, [], []),
         ('GPT header read fails', {0: protective, 2: gpt[2], 200: fat_boot()}, []),
-        ('partition read fails', {0: ordinary}, []),
-        ('partition signature absent', {0: ordinary, 100: fat_boot(signature=b'\0\0')}, []),
-        ('partition BPB invalid', {0: ordinary, 100: bytes(510) + b'\x55\xaa'}, []),
-        ('empty flat medium not published', {0: fat_boot(total=0)}, []),
+        # The partition contents are not examined: the handler decides.
+        ('partition unreadable', {0: ordinary}, [(eq['PES_MBR'], 100, 8)]),
+        ('partition signature absent', {0: ordinary, 100: fat_boot(signature=b'\0\0')},
+         [(eq['PES_MBR'], 100, 8)]),
+        ('partition BPB invalid', {0: ordinary, 100: bytes(510) + b'\x55\xaa'},
+         [(eq['PES_MBR'], 100, 8)]),
+        # The size of a whole-medium row comes from the device, not the BPB.
+        ('flat size from geometry', {0: fat_boot(total=0)}, [('flat', 0, 64)]),
+        # A slot table is a partition table only when every status byte is
+        # 00 or 80 and some slot has a type; otherwise the medium is one row.
+        ('slot status 01 is not a table', {0: mbr([(0x01, 0x0c, 100, 8)]), 100: fat_boot()},
+         [('flat', 0, 64)]),
+        ('empty slot table is not a table', {0: mbr([])}, [('flat', 0, 64)]),
+        ('no signature, no BPB: one row', {0: bytes(512)}, [('flat', 0, 64)]),
+        ('status 80 and 00 slots are a table',
+         {0: mbr([(0x80, 0x83, 50, 8), (0, 0x0c, 100, 8)]), 100: fat_boot()},
+         [(eq['PES_MBR'], 100, 8)]),
     ]
     # A valid BPB at LBA0 takes precedence over protective MBR bytes.
     flat = bytearray(fat_boot())
     flat[446:510] = protective[446:510]
     cases.append(('flat BPB precedes table bytes', {**gpt, 0: bytes(flat)}, [('flat', 0, 64)]))
-    for name, blocks, expected in cases:
+    for name, blocks, expected, *reconcile in cases:
         w = Scanner(image, eq, blocks)
         try:
             n = w.run('_scanRun', context=w.CTX)
             check('scan ' + name, (n, w.published, w.reconcile),
-                  (len(expected), expected, ['clear', 'purge']))
+                  (len(expected), expected, reconcile[0] if reconcile else ['clear', 'purge']))
         finally:
             w.close()
 
-    # A primary failing the boot gate does not stop the logicals behind it.
+    # Block 0 with an Amiga DosType gives that DosType; anything else one FAT
+    # row, the handler decides.
+    for name, block, want in (('FAT boot block', fat_boot(), eq['DOSTYPE_FAT']),
+                              ('other volume', bytes(510) + b'\x55\xaa', eq['DOSTYPE_FAT']),
+                              ('blank', bytes(512), eq['DOSTYPE_FAT']),
+                              ('DOS\\1', b'DOS\x01' + bytes(508), 0x444F5301),
+                              ('PFS\\3', b'PFS\x03' + bytes(508), 0x50465303),
+                              ('SFS\\0', b'SFS\x00' + bytes(508), 0x53465300),
+                              ('lower case', b'Dos\x01' + bytes(508), eq['DOSTYPE_FAT']),
+                              ('printable 4th byte', b'DOSX' + bytes(508), eq['DOSTYPE_FAT'])):
+        w = Scanner(image, eq, {0: block})
+        try:
+            w.run('_scanRun', context=w.CTX)
+            check('whole medium DosType, ' + name, w.dostypes, [want])
+        finally:
+            w.close()
+
+    # Logicals are published behind the primaries.
     blocks = {0: mbr([(0, 0x06, 100, 8), (0, 0x0c, 200, 8), (0, 0x0f, 1000, 100)]),
-              100: fat_boot(), 1000: ebr((0, 0x0c, 10, 8)), 1010: fat_boot()}
+              1000: ebr((0, 0x0c, 10, 8))}
     w = Scanner(image, eq, blocks)
     try:
         n = w.run('_scanRun', context=w.CTX)
         check('scan MBR logical published', (n, w.published),
-              (2, [(eq['PES_MBR'], 100, 8), (eq['PES_MBR'], 1010, 8)]))
+              (3, [(eq['PES_MBR'], 100, 8), (eq['PES_MBR'], 200, 8),
+                   (eq['PES_MBR'], 1010, 8)]))
     finally:
         w.close()
 
@@ -292,14 +352,14 @@ def run_suite(cpu, flavour):
         boot = present | (1 << eq['PRFB_BOOTABLE'])
 
         # --- MBR ------------------------------------------------------
-        for kind in (0x01, 0x04, 0x06, 0x0b, 0x0c, 0x0e):
+        for kind in (0x01, 0x04, 0x06, 0x0b, 0x0c, 0x0e, 0x07):
             w = Walker(image, eq)
             n = w.run('_partScanMBR', a0=w.mem.w_block(BLOCK, mbr([(0, kind, 100, 8)])) or BLOCK)
             check('mbr type %02x accepted' % kind, (n, w.records(n)),
                   (1, [{'start': 100, 'blocks': 8, 'dostype': eq['DOSTYPE_FAT'],
                         'index': 0, 'flags': present}]))
             w.close()
-        for kind in (0x00, 0x05, 0x07, 0x82, 0xee):
+        for kind in (0x00, 0x05, 0x82, 0xee):
             w = Walker(image, eq)
             w.mem.w_block(BLOCK, mbr([(0, kind, 100, 8)]))
             check('mbr type %02x refused' % kind, w.run('_partScanMBR', a0=BLOCK), 0)
@@ -344,7 +404,7 @@ def run_suite(cpu, flavour):
                      [(100, 8, 0), (1010, 20, 4), (1110, 30, 5)], [1000, 1100])
         logicals('non-FAT logical skipped but indexed',
                  {0: mbr([(0, 0x0f, 1000, 500)]),
-                  1000: ebr((0, 0x07, 10, 20), (0, 0x05, 100, 50)),
+                  1000: ebr((0, 0x83, 10, 20), (0, 0x05, 100, 50)),
                   1100: ebr((0, 0x0c, 10, 30))},
                  [(1110, 30, 5)])
         logicals('empty EBR entry takes no index',
@@ -390,17 +450,18 @@ def run_suite(cpu, flavour):
                   0xfffffff0: ebr((0, 0x0c, 1, 2), (0, 0x05, 0x20, 50))},
                  [(0xfffffff1, 2, 4)], [0xfffffff0])
 
-        # Three primaries leave slot 3 for the extended one; the logicals fill
-        # the rest, the last taking index 4 + (PART_MAX_REC - 3) - 1.
-        chain = {0: mbr([(0, 0x0c, 10 + i, 1) for i in range(3)] + [(0, 0x0f, 1000, 5000)])}
-        for i in range(eq['PART_MAX_REC']):
+        # Three primaries leave slot 3 for the extended one; the logicals take
+        # indexes 4..99, the two-digit budget of the synthesized names, which
+        # PART_MAX_REC covers.
+        chain = {0: mbr([(0, 0x0c, 10 + i, 1) for i in range(3)] + [(0, 0x0f, 1000, 50000)])}
+        for i in range(120):
             chain[1000 + i * 100] = ebr((0, 0x0c, 10, 1), (0, 0x05, (i + 1) * 100, 50))
         w = Walker(image, eq, chain)
         w.mem.w_block(BLOCK, chain[0])
         n = w.run('_partScanMBR', a0=BLOCK)
-        check('mbr logicals stop at PART_MAX_REC',
-              (n, w.records(n)[-1]['index'], len(w.reads)),
-              (eq['PART_MAX_REC'], eq['PART_MAX_REC'], eq['PART_MAX_REC'] - 3))
+        check('mbr logicals stop at index 99',
+              (n, w.records(n)[-1]['index'], len(w.reads), eq['PART_MAX_REC'] >= n),
+              (3 + 96, 99, 96, True))
         w.close()
 
         # --- GPT, well-formed ----------------------------------------
@@ -413,6 +474,15 @@ def run_suite(cpu, flavour):
                   (1, [{'start': 2048, 'blocks': 2048, 'dostype': eq['DOSTYPE_FAT'],
                         'index': 0, 'flags': gptf}]))
             w.close()
+
+        # Entries sharing a block cost one read of it; the next block one more.
+        blocks = {1: gpt_header(count=6)}
+        blocks.update(entry_blocks([gpt_entry(MS_BASIC, 2048 + i * 16, 2055 + i * 16)
+                                    for i in range(6)]))
+        w = Walker(image, eq, blocks)
+        n = w.run('_partScanGPT')
+        check('gpt entry block read once', (n, w.reads), (6, [1, 2, 3]))
+        w.close()
 
         for label, blocks in (
                 ('no header block', {}),

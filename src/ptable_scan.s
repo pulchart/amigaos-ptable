@@ -11,10 +11,6 @@
 ;   a4 = &BootCtx, a5 = ExecBase.
 ;===========================================================
 
-;-- superfloppy BPB total-sector fields (little-endian, block 0)
-BPB_TOTAL16	= 19
-BPB_TOTAL32	= 32
-
 ;===========================================================
 ; _scanRun: detect + publish for BC_DevName/BC_Unit.
 ; In : a4 = &BootCtx (unit open), a5 = ExecBase; PTR_Lock held
@@ -23,11 +19,14 @@ BPB_TOTAL32	= 32
 _scanRun:
 	movem.l	d2-d7/a2-a3/a6,-(sp)
 	moveq.l	#0,d7			;d7 = published count
+	clr.b	BC_ScanErr(a4)
+	bsr	_scanGeometry		;block size and medium size
 
-;-- whole-unit reconcile: clear PRESENT for this device+unit; the publishers
-;   below re-set it only on the slots the current card actually has, and
-;   _scanPurge at _srn_out then drops the now-absent ones (keeping mounted)
-	bsr	_scanClearPresent
+;-- whole-unit reconcile: once the medium is classified, PRESENT is cleared
+;   for this device+unit (_scanClearPresent); the publishers re-set it on the
+;   slots the current card has and _scanPurge at _srn_out drops the rest
+;   (keeping mounted). A read error during the walk (BC_ScanErr) skips the
+;   purge: rows the walk did not reach are left as they are, not freed.
 
 ;-- valid RDSK in blocks 0..15?
 	moveq.l	#0,d6
@@ -39,14 +38,17 @@ _srn_rdsk:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#RDSK_ID,(a0)
 	bne.s	_srn_rdsk_next
-	move.l	rdb_SummedLongs(a0),d1
-	moveq.l	#9,d0			;fields read reach long index 8; 0 would
-	cmp.l	d0,d1			;checksum as valid trivially
-	blo.s	_srn_rdsk_next
-	cmp.l	#128,d1
-	bhi.s	_srn_rdsk_next
-	bsr	_bootChecksum
+	moveq.l	#9,d1			;fields read reach long index 8
+	bsr	_bootBlockOK
+	bne.s	_srn_rdsk_next
+	moveq.l	#0,d0			;an RDB of another block size cannot
+	move.b	BC_BlockShift(a4),d0	;be walked in this device's blocks
+	moveq.l	#1,d1
+	lsl.l	d0,d1
+	cmp.l	rdb_BlockBytes(a0),d1
 	beq.w	_srn_rdb
+	bsr	_scanClearPresent	;an RDB disk this scan cannot walk: no
+	bra.w	_srn_out		;rows, not one over the whole medium
 _srn_rdsk_next:
 	addq.l	#1,d6
 	cmp.l	#RDB_LOCATION_LIMIT,d6
@@ -56,21 +58,32 @@ _srn_rdsk_next:
 	moveq.l	#0,d0
 	bsr	_bootReadBlock
 	tst.l	d0
-	bne.w	_srn_out
+	bne.w	_srn_rderr		;unreadable: the previous state stands
+	move.l	BC_BlockBuf(a4),a0
+	bsr	_partAmigaType		;an Amiga filesystem's DosType at LBA 0?
+	move.l	d0,d2
+	bne.w	_srn_tagged
 	move.l	BC_BlockBuf(a4),a0
 	bsr	_partIsBootBlock	;FAT BPB straight at LBA 0?
 	tst.l	d0
 	bne.w	_srn_flat
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.w	#$55AA,510(a0)
-	bne.w	_srn_none		;nothing recognised
-	cmpi.b	#$EE,446+4(a0)
+	bne.w	_srn_whole		;no partition table
+	bsr	_partIsMBR		;slot table well-formed?
+	tst.l	d0
+	beq.w	_srn_whole		;boot code or another volume, not a table
+;-- a protective entry in any slot means GPT; a hybrid MBR mirrors only
+;   some of the GPT partitions in the other slots
+	move.l	BC_BlockBuf(a4),a0
+	lea	446+4(a0),a1
+	moveq.l	#3,d1
+_srn_ee:
+	cmpi.b	#$EE,(a1)
 	beq.w	_srn_gpt
+	lea	16(a1),a1
+	dbra	d1,_srn_ee
 	bra.w	_srn_mbr
-
-_srn_none:
-	PTMSG	dbg_boot_no_rdb		;"[PT] no partition table"
-	bra.w	_srn_out
 
 ;- - RDB: FSHD handler load, then publish each PART block - -
 ;   (a slot already present is refreshed in place via _scanFindSlot
@@ -103,6 +116,9 @@ _srn_fs_loop:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#FSHD_ID,(a0)
 	bne.s	_srn_fs_done
+	moveq.l	#3,d1
+	bsr	_bootBlockOK
+	bne.s	_srn_fs_done
 	move.l	fhb_Next(a0),d3
 	bsr	_bootAddOneFileSys
 	cmp.l	d3,d6			;self-loop guard
@@ -111,6 +127,7 @@ _srn_fs_loop:
 _srn_fs_done:
 
 ;-- Phase 2: publish partitions (hop-capped walk)
+	bsr	_scanClearPresent
 	move.l	d5,d3
 	moveq.l	#127,d2
 	moveq.l	#0,d5			;d5 = partition index
@@ -124,10 +141,13 @@ _srn_pt_loop:
 	move.l	d3,d0
 	bsr	_bootReadBlock
 	tst.l	d0
-	bne.w	_srn_out
+	bne.w	_srn_rderr
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#PART_ID,(a0)
 	bne.w	_srn_out
+	moveq.l	#3,d1
+	bsr	_bootBlockOK
+	bne.w	_srn_out		;torn block: the chain ends here
 	move.l	pb_Next(a0),d3
 	bsr	_scanPubRDB		;d5 = index; buffer = PART block
 	add.l	d0,d7
@@ -136,45 +156,62 @@ _srn_pt_loop:
 	beq.w	_srn_out
 	bra.s	_srn_pt_loop
 
-;- - superfloppy: one whole-disk FAT entry - - - - - - - - -
+;- - whole medium: one entry over the device - - - - - - - -
+;   Block 0 with an Amiga DosType gives a row of that DosType over the whole
+;   medium. Any other block 0 without a partition table, FAT boot block or
+;   not, gives one FAT row; the handler bound to the node reads block 0 and
+;   decides.
+_srn_tagged:
+	PTMSG	dbg_pt_tagged
+	bra.s	_srn_pubflat
+_srn_whole:
+	PTMSG	dbg_pt_whole
+	ifd	DEBUG
+	bra.s	_srn_fatflat
+	endc
 _srn_flat:
 	PTMSG	dbg_pt_flat
-;-- a0 = block 0 with a validated FAT BPB; total sectors is the
-;   little-endian word at 19, or the long at 32 when the word is 0
-	moveq.l	#0,d1
-	move.b	BPB_TOTAL16+1(a0),d1
-	lsl.w	#8,d1
-	move.b	BPB_TOTAL16(a0),d1
-	tst.w	d1
-	bne.s	_srn_fl_have
-	move.l	BPB_TOTAL32(a0),d1
-	REVL	d1
-_srn_fl_have:
-	tst.l	d1
-	beq.w	_srn_out
-	bsr	_scanPubFlat		;d1 = total sectors
+_srn_fatflat:
+	move.l	#DOSTYPE_FAT,d2
+_srn_pubflat:
+	bsr	_scanClearPresent
+	move.l	BC_Medium(a4),d1	;d1 = medium size, 0 = unknown
+	bsr	_scanPubFlat		;d1 = size, d2 = DosType
 	add.l	d0,d7
 	bra.w	_srn_out
 
 ;- - MBR / GPT: walker -> PartRec[] -> publish - - - - - - -
 _srn_mbr:
 	PTMSG	dbg_pt_mbr
-	lea	-(PART_MAX_REC*PR_Sizeof)(sp),sp		;PART_MAX_REC * PR_Sizeof
-	move.l	sp,a2			;a2 = PartRec buffer
-	move.l	BC_BlockBuf(a4),a0
-	lea	_psReadLBA(pc),a3	;EBR chain reader
-	bsr	_partScanMBR
 	moveq.l	#PES_MBR,d6
-	bra.s	_srn_pubrecs
+	bra.s	_srn_table
 _srn_gpt:
 	PTMSG	dbg_pt_gpt
-	lea	-(PART_MAX_REC*PR_Sizeof)(sp),sp
-	move.l	sp,a2
-	lea	_psReadLBA(pc),a3
-	bsr	_partScanGPT
 	moveq.l	#PES_GPT,d6
+_srn_table:
+	move.l	#PART_MAX_REC*PR_Sizeof,d0
+	moveq.l	#MEMF_PUBLIC,d1
+	move.l	a5,a6
+	jsr	AllocMem(a6)
+	tst.l	d0
+	beq.w	_srn_rderr		;not walked: keep the rows as they are
+	move.l	d0,a2			;a2 = PartRec buffer
+	move.l	BC_BlockBuf(a4),a0	;block 0 for the MBR walker
+	lea	_psReadLBA(pc),a3	;EBR / GPT block reader
+	cmp.b	#PES_GPT,d6
+	beq.s	_srn_walkgpt
+	bsr	_partScanMBR
+	bra.s	_srn_pubrecs
+_srn_walkgpt:
+	moveq.l	#0,d1
+	move.b	BC_BlockShift(a4),d1
+	bsr	_partScanGPT
 _srn_pubrecs:
 	move.l	d0,d5			;d5 = record count
+	tst.b	BC_ScanErr(a4)		;table not read in full: keep the
+	bne.s	_srn_pr_keep		;rows it did not reach as they are
+	bsr	_scanClearPresent
+_srn_pr_keep:
 	moveq.l	#0,d4			;d4 = record index
 _srn_pr_loop:
 	cmp.l	d5,d4
@@ -182,29 +219,26 @@ _srn_pr_loop:
 	move.l	d4,d0
 	mulu.w	#PR_Sizeof,d0
 	lea	0(a2,d0.l),a3		;a3 = &PartRec[d4]
-;-- boot-block sanity gate before publishing
-	move.l	PR_StartLBA(a3),d0
-	bsr	_psReadLBA
-	tst.l	d0
-	bne.s	_srn_pr_next
-	cmpi.w	#$55AA,510(a0)
-	bne.s	_srn_pr_next
-	bsr	_partIsBootBlock
-	tst.l	d0
-	beq.s	_srn_pr_next
 	bsr	_scanPubRec		;a3 = &PartRec, d6 = source
 	add.l	d0,d7
-_srn_pr_next:
 	addq.l	#1,d4
 	bra.s	_srn_pr_loop
 _srn_pr_done:
-	lea	(PART_MAX_REC*PR_Sizeof)(sp),sp
-
+	move.l	a2,a1
+	move.l	#PART_MAX_REC*PR_Sizeof,d0
+	move.l	a5,a6
+	jsr	FreeMem(a6)
+	bra.s	_srn_out
+_srn_rderr:
+	st	BC_ScanErr(a4)
 _srn_out:
 ;-- drop slots the current card no longer has (PRESENT still clear after the
 ;   reconcile): mounted ones are kept (shown absent ---M), unmounted
 ;   published-only ones are freed. Preserves d7 (the published count).
+	tst.b	BC_ScanErr(a4)
+	bne.s	_srn_nopurge
 	bsr	_scanPurge
+_srn_nopurge:
 	move.l	d7,d0
 	PTDEC	dbg_pt_recs
 	movem.l	(sp)+,d2-d7/a2-a3/a6
@@ -230,25 +264,38 @@ _scanPubRDB:
 
 ;-- geometry summary first (it is also the duplicate key):
 ;   cylblocks = Surfaces * BlocksPerTrack;
-;   start = LowCyl * cylblocks; count = (HighCyl-LowCyl+1) * cylblocks
+;   start = LowCyl * cylblocks; count = (HighCyl-LowCyl+1) * cylblocks.
+;   A start past 32 bits cannot serve as the key: not published. A count
+;   reaching past 32 bits is cut at the last 32-bit block.
 	move.l	pb_Environment+DE_Surfaces*4(a2),d0
 	move.l	pb_Environment+DE_BlocksPerTrk*4(a2),d1
 	UMUL32
+	bvs.w	_spr_skip
 	move.l	d0,d4			;d4 = cylblocks
 	move.l	pb_Environment+DE_LowCyl*4(a2),d0
 	move.l	d4,d1
 	UMUL32
+	bvs.w	_spr_skip
 	move.l	d0,d6			;d6 = start
 	move.l	pb_Environment+DE_HighCyl*4(a2),d0
 	sub.l	pb_Environment+DE_LowCyl*4(a2),d0
+	bcs.w	_spr_skip		;HighCyl below LowCyl
 	addq.l	#1,d0
+	beq.s	_spr_cut
 	move.l	d4,d1
 	UMUL32
+	bvs.s	_spr_cut
 	move.l	d0,d4			;d4 = block count
+	subq.l	#1,d0
+	add.l	d6,d0
+	bcc.s	_spr_key		;last block fits 32 bits
+_spr_cut:
+	move.l	d6,d4
+	not.l	d4			;last block $FFFFFFFE
+_spr_key:
 
 ;-- same slot already present (rescan / card swap)?  refresh it in place
-	move.l	d6,d0
-	bsr	_scanFindSlot
+	bsr	_scanFindRDB
 	tst.l	d0
 	bne.w	_spr_upd
 
@@ -301,6 +348,20 @@ _frd_nm:
 	move.b	d0,pe_Flags(a3)
 	move.l	pb_Environment+DE_BOOTPRI*4(a2),pe_BootPri(a3)
 	move.l	pb_Environment+DE_DOSTYPE*4(a2),pe_DosType(a3)
+;-- RDB rows count blocks of the envec's SizeBlock; its log2 when that is a
+;   power of two, else 0 (unknown)
+	moveq.l	#0,d0
+	move.l	pb_Environment+DE_SizeBlock*4(a2),d1
+	beq.s	_frd_bs
+	moveq.l	#1,d0			;SizeBlock counts longs: +2
+_frd_bsl:
+	addq.l	#1,d0
+	lsr.l	#1,d1
+	bcc.s	_frd_bsl
+	beq.s	_frd_bs			;no bit left above the lowest
+	moveq.l	#0,d0			;more than one bit set
+_frd_bs:
+	move.b	d0,pe_BlockShift(a3)
 	lea	pb_Environment(a2),a0
 	lea	pe_Envec(a3),a1
 	move.l	d2,d3
@@ -341,6 +402,8 @@ _scanPubRec:
 ;-- same slot already present (rescan / card swap)?  refresh it in place
 	moveq.l	#0,d0
 	move.b	PR_PartIndex(a2),d0	;identity = partition index (CF<index>)
+	move.l	PR_DosType(a2),d2
+	move.l	PR_BlockCount(a2),d3
 	bsr	_scanFindByIndex
 	tst.l	d0
 	bne.s	_spc_upd
@@ -389,6 +452,7 @@ _sfr_nb:
 	or.b	d1,d2
 	move.b	d2,pe_Flags(a3)
 	move.l	PR_DosType(a2),pe_DosType(a3)
+	move.b	BC_BlockShift(a4),pe_BlockShift(a3)
 	move.l	PR_StartLBA(a2),pe_StartLBA(a3)
 	move.l	PR_BlockCount(a2),pe_BlockCount(a3)
 	lea	pe_Envec(a3),a0
@@ -401,15 +465,57 @@ _sfr_nb:
 	rts
 
 ;===========================================================
-; _scanPubFlat: publish the superfloppy whole-disk entry.
-; In : d1 = total sectors, a4, a5
+; _scanGeometry: TD_GETGEOMETRY -> BC_BlockShift and BC_Medium.
+; A sector size of 512, 1024, 2048 or 4096 bytes sets the block shift; an
+; unset one (0) means 512. A failed command or any other size leaves 512
+; and an unknown medium size.
+; In : a4 = &BootCtx (unit open), a5 = ExecBase. Clobbers d0-d2.
+;===========================================================
+_scanGeometry:
+	moveq.l	#9,d1			;d1 = shift
+	moveq.l	#0,d2			;d2 = medium blocks
+	bsr	_bootGeometry
+	tst.l	d0
+	bne.s	_sgeo_set
+	move.l	BC_Geometry+DG_TotalSectors(a4),d2
+	move.l	BC_Geometry+DG_SectorSize(a4),d0
+	beq.s	_sgeo_set		;unset: the driver works in 512-byte blocks
+_sgeo_find:				;halve the size down to 512, counting
+	cmp.l	#512,d0
+	beq.s	_sgeo_set
+	bcs.s	_sgeo_bad		;below 512
+	btst	#0,d0
+	bne.s	_sgeo_bad		;not a power of two
+	lsr.l	#1,d0
+	addq.l	#1,d1
+	cmp.l	#12,d1
+	bls.s	_sgeo_find
+_sgeo_bad:
+	moveq.l	#9,d1			;unsupported size: 512, size unknown
+	moveq.l	#0,d2
+_sgeo_set:
+	move.b	d1,BC_BlockShift(a4)
+	move.l	d2,BC_Medium(a4)
+	rts
+
+;===========================================================
+; _scanPubFlat: publish the whole-medium entry.
+; In : d1 = size in blocks (0 = unknown), d2 = DosType, a4, a5
 ; Out: d0 = 1 published / 0 failed
 ;===========================================================
 _scanPubFlat:
 	movem.l	d2-d3/a2-a3,-(sp)
 	move.l	d1,d3			;d3 = total sectors
+;-- a row of another DosType has a fixed window, which needs the size
+	move.l	d2,d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_spf_sized
+	tst.l	d3
+	beq.s	_spf_fail
+_spf_sized:
 
-;-- same slot (whole-disk = index 0) already present?  refresh it in place
+;-- same slot (whole medium = index 0) already present?  refresh it in place
 	moveq.l	#0,d0			;slot index 0
 	bsr	_scanFindByIndex
 	tst.l	d0
@@ -437,9 +543,9 @@ _spf_fail:
 	rts
 
 ;===========================================================
-; _scanFillFlat: write the superfloppy whole-disk geometry into an entry.
-; In : a3 = entry, d3 = total sectors, a4, a5. Sets PEB_PRESENT, preserves
-; PEB_MOUNTED; leaves the mount overlay intact.
+; _scanFillFlat: write the whole-medium geometry into an entry.
+; In : a3 = entry, d2 = DosType, d3 = size in blocks, a4, a5. Sets
+; PEB_PRESENT, preserves PEB_MOUNTED; leaves the mount overlay intact.
 ;===========================================================
 _scanFillFlat:
 	clr.l	pe_PartIndex(a3)
@@ -447,18 +553,25 @@ _scanFillFlat:
 ;-- rebuild flags, preserving only PEB_MOUNTED + the policy bits (as
 ;   _scanFillRec does): stale BOOTABLE/NOMOUNT bits from a previous card
 ;   must not survive the refresh
-	move.b	pe_Flags(a3),d2
-	and.b	#(1<<PEB_MOUNTED)|(1<<PEB_KEEPSTATIC)|(1<<PEB_MOUNTUSED),d2
-	or.b	#1<<PEB_PRESENT,d2
-	move.b	d2,pe_Flags(a3)
-	move.l	#DOSTYPE_FAT,pe_DosType(a3)
+	move.b	pe_Flags(a3),d0
+	and.b	#(1<<PEB_MOUNTED)|(1<<PEB_KEEPSTATIC)|(1<<PEB_MOUNTUSED),d0
+	or.b	#1<<PEB_PRESENT,d0
+	move.b	d0,pe_Flags(a3)
+	move.l	d2,pe_DosType(a3)
+	move.b	BC_BlockShift(a4),pe_BlockShift(a3)
 	clr.l	pe_StartLBA(a3)
 	move.l	d3,pe_BlockCount(a3)
 	lea	pe_Envec(a3),a0
 	moveq.l	#0,d0			;start
 	move.l	d3,d1			;count
-	move.l	#DOSTYPE_FAT,d2
 	bsr	_scanFillEnvec
+;-- not FAT: the node carries the DosType, LowCyl 0..HighCyl is the medium
+	move.l	d2,d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_sff_name
+	move.l	d2,DE_DOSTYPE*4(a0)
+_sff_name:
 	moveq.l	#0,d0
 	bsr	_scanSynthName
 	rts
@@ -728,13 +841,23 @@ s_dotdevice:
 ; (used by ScanViaPtable to select) and pe_DosType (FAT, for the candidate
 ; filter + lsptres) are kept by the caller; only the node envec is synthesized
 ; here.
-; Fake CHS: Surfaces=1, BlocksPerTrack=1 -> 1 block per cylinder.
-; In : a0 = &envec, d0 = StartLBA (unused), d1 = BlockCount, d2 = DosType (unused)
+; Fake CHS: Surfaces=1, BlocksPerTrack=1 -> 1 device block per cylinder.
+; In : a0 = &envec, d0 = StartLBA (unused), d1 = BlockCount, d2 = DosType
+;      (unused), a4 = &BootCtx (BC_BlockShift)
 ;===========================================================
 _scanFillEnvec:
-	movem.l	d3,-(sp)
+	movem.l	d3-d4,-(sp)
 	move.l	#16,DE_TableSize*4(a0)
-	move.l	#128,DE_SizeBlock*4(a0)
+	moveq.l	#0,d4
+	move.b	BC_BlockShift(a4),d4
+	moveq.l	#1,d3
+	lsl.l	d4,d3			;d3 = block size
+	move.l	d3,d4
+	lsr.l	#2,d4
+	move.l	d4,DE_SizeBlock*4(a0)	;in longs
+	neg.l	d3
+	and.l	#$0001FE00,d3		;largest transfer, whole blocks
+	move.l	d3,DE_MaxTransfer*4(a0)
 	clr.l	DE_SecOrg*4(a0)
 	move.l	#1,DE_Surfaces*4(a0)
 	move.l	#1,DE_SectorPerBlk*4(a0)
@@ -748,11 +871,10 @@ _scanFillEnvec:
 	move.l	d3,DE_HighCyl*4(a0)	;informational size; ignored when auto-detect
 	move.l	#30,DE_NumBuffers*4(a0)
 	clr.l	DE_BufMemType*4(a0)
-	move.l	#$0001FE00,DE_MaxTransfer*4(a0)
 	move.l	#$7FFFFFFE,DE_Mask*4(a0)
 	clr.l	DE_BOOTPRI*4(a0)
 	move.l	#DEVICE_DOSTYPE_MARKER,DE_DOSTYPE*4(a0)	;device-name scheme
-	movem.l	(sp)+,d3
+	movem.l	(sp)+,d3-d4
 	rts
 
 ;===========================================================
@@ -764,8 +886,7 @@ _scanFillEnvec:
 ; In : a4 = &BootCtx, a5 = ExecBase; PTR_Lock held
 ;===========================================================
 _scanClearPresent:
-	movem.l	d3/a2-a3/a6,-(sp)
-	move.l	BC_Unit(a4),d3
+	movem.l	a2-a3/a6,-(sp)
 	bsr	_partGetResource
 	tst.l	d0
 	beq.s	_scp_out
@@ -775,11 +896,7 @@ _scanClearPresent:
 _scp_walk:
 	move.l	(a3),d0
 	beq.s	_scp_out
-	cmp.l	pe_Unit(a3),d3
-	bne.s	_scp_next
-	move.l	pe_Device(a3),a0
-	move.l	BC_DevName(a4),a1
-	bsr	_psStrEq
+	bsr	_actMatch
 	tst.l	d0
 	beq.s	_scp_next
 	bclr	#PEB_PRESENT,pe_Flags(a3)
@@ -787,7 +904,7 @@ _scp_next:
 	move.l	(a3),a3
 	bra.s	_scp_walk
 _scp_out:
-	movem.l	(sp)+,d3/a2-a3/a6
+	movem.l	(sp)+,a2-a3/a6
 	rts
 
 ;===========================================================
@@ -841,76 +958,133 @@ _spg_out:
 	rts
 
 ;===========================================================
-; _scanFindByIndex / _scanFindSlot: find the entry for this slot,
-; matched by device + unit + ONE identity field:
-;   _scanFindByIndex: pe_PartIndex - the synthesized schemes
-;     (MBR/GPT/FLAT) name a slot by its index (CF<index>), so the
-;     same slot is reused across card swaps regardless of where the
-;     partition starts or how big it is.
-;   _scanFindSlot: pe_StartLBA - RDB carries real names; a card has
-;     exactly one partition starting at a given LBA (the FS size may
-;     differ from the partition size, so blockCount is NOT part of
-;     the identity - same rule RegisterPartition uses).
-; The publisher updates a found entry in place (refreshing geometry,
-; preserving the mount overlay) instead of publishing a duplicate;
-; this is the single rule that prevents double entries across card
-; swaps for every scheme.
-; In : d0 = partIndex / StartLBA, a4 = &BootCtx, a5 = ExecBase
-; Out: d0 = matching PartEntry, or 0 if none; clobbers d1
+; _scanFindRDB: the RDB entry to refresh for the PART block at a2.
+; Matched by device + unit + pe_StartLBA: a card has one partition
+; starting at a given block. Among those, the entry whose envec window
+; and DosType equal the block's is taken; else an unmounted one, which
+; is refreshed in place. A mounted entry with another window is never
+; refreshed: its node keeps the old geometry, so the entry is left to the
+; purge (MOUNTED + INVALID) and the partition gets a new entry.
+; In : a2 = PART block, d6 = start block, a4 = &BootCtx, a5 = ExecBase
+; Out: d0 = entry, or 0 for a new one; clobbers d1
 ;===========================================================
-_scanFindByIndex:
-	moveq.l	#pe_PartIndex,d1
-	bra.s	_scanFindBy
-_scanFindSlot:
-	moveq.l	#pe_StartLBA,d1
-_scanFindBy:
-	movem.l	d2-d5/a2-a3,-(sp)
-	move.l	d1,d2			;d2 = identity field offset
-	move.l	d0,d4			;d4 = identity value
-	move.l	BC_Unit(a4),d3
-;-- the identity includes the scheme class: an RDB entry may only be
-;   refreshed by the RDB publisher (StartLBA identity) and a table entry only
-;   by the MBR/GPT/flat publishers (PartIndex identity), or a card swap that
-;   changes the scheme would rewrite a mounted entry of the other kind in
-;   place instead of leaving it to purge (kept as MOUNTED+INVALID)
-	moveq.l	#1,d5			;d5 = 1: caller wants a PES_RDB entry
-	cmp.l	#pe_StartLBA,d2
-	beq.s	_sfb_res
-	moveq.l	#0,d5			;0: caller wants a non-RDB entry
-_sfb_res:
+_scanFindRDB:
+	movem.l	d3/a0-a1/a3,-(sp)
+	moveq.l	#0,d3			;d3 = unmounted entry to fall back on
 	bsr	_partGetResource
 	tst.l	d0
-	beq.s	_sfb_no
+	beq.s	_sfr_out
+	move.l	d0,a3
+	move.l	PTR_PartList(a3),a3
+_sfr_walk:
+	tst.l	(a3)
+	beq.s	_sfr_end
+	cmp.l	pe_StartLBA(a3),d6
+	bne.s	_sfr_next
+	cmp.b	#PES_RDB,pe_Source(a3)
+	bne.s	_sfr_next
+	bsr	_actMatch
+	tst.l	d0
+	beq.s	_sfr_next
+	lea	pe_Envec(a3),a0
+	lea	pb_Environment(a2),a1
+	moveq.l	#DE_SizeBlock*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_Surfaces*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_BlocksPerTrk*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_LowCyl*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_HighCyl*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_DOSTYPE*4,d0
+	bsr.s	_sfr_cmp
+	move.l	a3,d0			;same partition: refresh this one
+	bra.s	_sfr_out
+_sfr_differs:
+	addq.l	#4,sp			;drop the _sfr_cmp return address
+	btst	#PEB_MOUNTED,pe_Flags(a3)
+	bne.s	_sfr_next		;its node has the old geometry
+	tst.l	d3
+	bne.s	_sfr_next
+	move.l	a3,d3
+_sfr_next:
+	move.l	(a3),a3
+	bra.s	_sfr_walk
+_sfr_end:
+	move.l	d3,d0
+_sfr_out:
+	movem.l	(sp)+,d3/a0-a1/a3
+	rts
+;-- _sfr_cmp: envec long at offset d0 equal in a0 and a1, else leave
+;   through _sfr_differs
+_sfr_cmp:
+	move.l	(a0,d0.w),d1
+	cmp.l	(a1,d0.w),d1
+	bne.s	_sfr_differs
+	rts
+
+;===========================================================
+; _scanFindByIndex: find the entry for this slot, matched by device +
+; unit + pe_PartIndex: the synthesized schemes (MBR/GPT/FLAT) name a
+; slot by its index (CF<index>), so the same slot is reused across card
+; swaps regardless of where the partition starts or how big it is. The
+; publisher updates a found entry in place (refreshing geometry,
+; preserving the mount overlay) instead of publishing a duplicate.
+; A mounted entry is reused only when its node fits the new partition:
+; the same DosType, and for a DosType other than FAT (a fixed window) the
+; same size. Else an unmounted entry is taken, or none; the mounted one is
+; left to the purge (MOUNTED + INVALID).
+; In : d0 = partIndex, d2 = DosType, d3 = size in blocks, a4, a5
+; Out: d0 = matching PartEntry, or 0 if none; clobbers d1/a0/a1
+;===========================================================
+_scanFindByIndex:
+	movem.l	d4/d6/a2-a3,-(sp)
+	move.l	d0,d4			;d4 = partition index
+	moveq.l	#0,d6			;d6 = unmounted entry to fall back on
+	bsr	_partGetResource
+	tst.l	d0
+	beq.s	_sfb_end
 	move.l	d0,a2
 	lea	PTR_PartList(a2),a2
 	move.l	(a2),a3
 _sfb_walk:
 	move.l	(a3),d0
-	beq.s	_sfb_no
-	cmp.l	pe_Unit(a3),d3
+	beq.s	_sfb_end
+	cmp.l	pe_PartIndex(a3),d4
 	bne.s	_sfb_next
-	cmp.l	(a3,d2.w),d4
-	bne.s	_sfb_next
-	moveq.l	#0,d0
+;-- an RDB entry is refreshed only by the RDB publisher, or a card swap that
+;   changes the scheme would rewrite a mounted entry of the other kind in
+;   place instead of leaving it to the purge (kept as MOUNTED+INVALID)
 	cmp.b	#PES_RDB,pe_Source(a3)
-	bne.s	_sfb_src
-	moveq.l	#1,d0
-_sfb_src:
-	cmp.b	d0,d5			;scheme class must match the caller's
-	bne.s	_sfb_next
-	move.l	pe_Device(a3),a0
-	move.l	BC_DevName(a4),a1
-	bsr	_psStrEq
+	beq.s	_sfb_next
+	bsr	_actMatch
 	tst.l	d0
-	bne.s	_sfb_yes
+	beq.s	_sfb_next
+	btst	#PEB_MOUNTED,pe_Flags(a3)
+	bne.s	_sfb_mounted
+	tst.l	d6
+	bne.s	_sfb_next
+	move.l	a3,d6
+	bra.s	_sfb_next
+_sfb_mounted:
+	cmp.l	pe_DosType(a3),d2
+	bne.s	_sfb_next		;its node serves another filesystem
+	move.l	d2,d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_sfb_yes		;auto-detect node: follows the card
+	cmp.l	pe_BlockCount(a3),d3
+	beq.s	_sfb_yes		;same window
 _sfb_next:
 	move.l	(a3),a3
 	bra.s	_sfb_walk
 _sfb_yes:
 	move.l	a3,d0			;return the matching entry
-	movem.l	(sp)+,d2-d5/a2-a3
+	movem.l	(sp)+,d4/d6/a2-a3
 	rts
-_sfb_no:
-	moveq.l	#0,d0
-	movem.l	(sp)+,d2-d5/a2-a3
+_sfb_end:
+	move.l	d6,d0
+	movem.l	(sp)+,d4/d6/a2-a3
 	rts

@@ -43,12 +43,17 @@ _bao_fshd_copy:
 	subq.l	#1,d0
 	bne.s	_bao_fshd_copy
 
-;-- skip if a handler with this DosType already exists
+;-- skip unless the RDB copy is newer than the entry for this DosType (if
+;   any). A newer one goes in front (_bootInsertFSEntry adds at the head,
+;   where the lookups start), as the stock RDB code does.
 	move.l	d2,d0
 	bsr	_bootFindFSEntry
 	tst.l	d0
 	beq.s	_bao_no_dup
-	bra.w	_bao_free_fshd
+	move.l	d0,a0
+	move.l	fse_Version(a0),d0
+	cmp.l	fhb_Version(a3),d0
+	bhs.w	_bao_free_fshd		;resident one is as new or newer
 _bao_no_dup:
 
 ;-- pass 1: count LSEG payload bytes
@@ -62,7 +67,13 @@ _bao_cnt_loop:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#LSEG_ID,(a0)
 	bne.w	_bao_free_fshd
-	add.l	#RDB_BLOCK_BYTES-lsb_LoadData,d4
+	moveq.l	#lsb_LoadData/4,d1
+	bsr	_bootBlockOK
+	bne.w	_bao_free_fshd
+	move.l	lsb_SummedLongs(a0),d0	;payload = the summed longs after the
+	subq.l	#lsb_LoadData/4,d0	;header, at most one block
+	lsl.l	#2,d0
+	add.l	d0,d4
 	cmp.l	#$100000,d4		;cap at 1 MiB; tested inside the loop so a
 	bhi.w	_bao_free_fshd		;cyclic lsb_Next chain cannot hang cold boot
 	move.l	lsb_Next(a0),d0
@@ -98,13 +109,21 @@ _bao_cp_loop:
 	move.l	BC_BlockBuf(a4),a1
 	cmpi.l	#LSEG_ID,(a1)
 	bne.w	_bao_free_seg
+	exg	a0,a1
+	moveq.l	#lsb_LoadData/4,d1
+	bsr	_bootBlockOK
+	exg	a0,a1			;exg leaves the flags alone
+	bne.w	_bao_free_seg
 	move.l	lsb_Next(a1),d5
+	move.l	lsb_SummedLongs(a1),d0
+	subq.l	#lsb_LoadData/4,d0	;payload longs (counted the same in pass 1)
 	lea	lsb_LoadData(a1),a1
-	move.l	#(RDB_BLOCK_BYTES-lsb_LoadData)>>2,d0
+	bra.s	_bao_cp_test
 _bao_cp_words:
 	move.l	(a1)+,(a0)+
+_bao_cp_test:
 	subq.l	#1,d0
-	bne.s	_bao_cp_words
+	bpl.s	_bao_cp_words
 	move.l	d5,d0
 	addq.l	#1,d0
 	bne.s	_bao_cp_loop

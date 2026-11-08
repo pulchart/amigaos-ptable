@@ -13,7 +13,7 @@ Each row reports the partition scheme it came from (RDB, MBR, GPT or a partition
 
 ```
 lsptres            ; default columns
-lsptres VERBOSE    ; also show CMD / Start / Blocks / Size (V works too)
+lsptres VERBOSE    ; also show CMD / Start / Blocks / Size / FS (V works too)
 lsptres >SER:      ; forward output over the serial line
 ```
 
@@ -29,7 +29,7 @@ On an interactive console the listing pauses a screenful at a time: any key cont
 | Device | Device serving the partition (e.g. `compactflash.device`, truncated to fit). |
 | Unit | Device unit number. |
 | Part | Partition index within the card (0-based): MBR primary 0-3, logical 4 onwards, GPT entry number, RDB list position. |
-| Src | Partition scheme: `MBR`, `GPT`, `RDB`, or `FLT` (flat / superfloppy). |
+| Src | Partition scheme: `MBR`, `GPT`, `RDB`, or `FLT` (flat: the whole medium, no partition table). |
 | Pri | Boot priority. |
 | DosType | The DosType the mount uses, as hex. For a mounted partition this is the DosType its node carries, which is `0x464154FF` for a FAT partition on the auto-detect scheme, whatever was configured when a filesystem was chosen explicitly, or what the handler itself registered for a statically mounted one. An unmounted partition has no node, so it shows the DosType detected on the card (`0x46415400` for FAT). Needs a layout 3 publisher, otherwise the detected DosType is always shown. |
 | Text | The DosType as four-character text; non-printable bytes (e.g. a trailing `\0`) show as `.`. |
@@ -42,9 +42,10 @@ Verbose (`VERBOSE` / `V`) appends:
 | Column | Meaning |
 |--------|---------|
 | CMD | Read command used for the device: `NSCMD`, `TD64`, `SCSI` or `CMD`. |
-| Start | Start block (LBA). |
-| Blocks | Block count. |
-| Size | Size in MiB, or kiB below 1 MiB. Both are binary: a block is 512 bytes. |
+| Start | Start block (LBA), in the device's blocks. |
+| Blocks | Block count, in the device's blocks. |
+| Size | Size in MiB, or kiB below 1 MiB. Both are binary; the block size comes from the resource (layout 6), else 512 bytes. |
+| FS | The filesystem the mounted handler reported, up to 8 characters, e.g. `FAT32` or `exFAT` from fat95; empty when it reported none (layout 6). |
 
 ## Examples
 
@@ -95,10 +96,10 @@ SDH2         compactflash.    0    4 RDB   0 0x50465303 PFS. P--M-     0
 ### Verbose
 
 ```
-layout v3, entry size 260
-Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl       CMD        Start      Blocks   Size
------------- ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ---------- ----------- ------
-CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M-     0 -d-D       NSCMD       2048     4194304  2048M
+layout v6, entry size 260
+Name         Device        Unit Part Src Pri DosType    Text Flags  MFlg Ctrl       CMD        Start      Blocks   Size FS
+------------ ------------- ---- ---- --- --- ---------- ---- ----- ----- ---------- ----- ---------- ----------- ------ --------
+CF0          compactflash.    0    0 GPT   0 0x464154FF FAT. P--M-     0 -d-D       NSCMD       2048     4194304  2048M FAT32
 ```
 
 ## See also

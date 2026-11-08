@@ -62,7 +62,7 @@ struct PartResource {
     UWORD                  pr_EntrySize;  /* 96  publisher's pe_Sizeof */
 };                                        /* 98 */
 
-#define PTR_LAYOUT_KNOWN 5  /* highest layout this tool understands */
+#define PTR_LAYOUT_KNOWN 6  /* highest layout this tool understands */
 
 /* PartEntry (ptable_pub.i; layout = PTR_LAYOUT_KNOWN) */
 struct PartEntry {
@@ -82,7 +82,7 @@ struct PartEntry {
     UBYTE        pe_NameB[32];   /* 56  (BSTR) */
     ULONG        pe_Envec[21];   /* 88 */
     UBYTE        pe_ReadMode;    /* 172 */
-    UBYTE        pe_pad;         /* 173 */
+    UBYTE        pe_BlockShift;  /* 173 layout 6: log2 bytes per block, 0 = 512 */
     UBYTE        pe_MountName[32];/* 174 (BSTR) */
     UBYTE        pe_pad2[2];     /* 206 (pad to pe_MountFlags) */
     ULONG        pe_MountFlags;  /* 208 */
@@ -91,7 +91,8 @@ struct PartEntry {
                                   *     appended fields against this) */
     UBYTE        pe_pad3[2];     /* 246 (pad to pe_NodeDosType) */
     ULONG        pe_NodeDosType; /* 248 layout 3: DosType stamped on the node */
-    UBYTE        pe_Reserved[8]; /* 252..259 */
+    UBYTE        pe_FsName[8];   /* 252 layout 6: filesystem from the registrant,
+                                  *     NUL-padded, no NUL when 8 long */
 };                               /* 260 */
 
 static const char *src_name(UBYTE s)
@@ -146,6 +147,23 @@ static const char *ctrl_str(const struct PartEntry *pe)
 
 /* publisher layout is 4 or newer: PEF_KEEPSTATIC is meaningful */
 static int g_layout4;
+/* publisher layout is 6 or newer: pe_BlockShift and pe_FsName are meaningful */
+static int g_layout6;
+
+/* Filesystem the handler reported for its partition, empty when unknown */
+static const char *fs_str(const struct PartEntry *pe)
+{
+    static char s[9];
+    int i;
+
+    s[0] = '\0';
+    if (!g_layout6)
+        return s;
+    for (i = 0; i < 8 && pe->pe_FsName[i] >= ' ' && pe->pe_FsName[i] < 127; i++)
+        s[i] = pe->pe_FsName[i];
+    s[i] = '\0';
+    return s;
+}
 
 /* 5-char flag picture. First char is three-valued: P present, I invalid
    (a card is in but it has no partition for this mounted slot), - absent.
@@ -256,14 +274,15 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
            "Name", "Device", "Unit", "Part", "Src", "Pri",
            "DosType", "Text", "Flags", "MFlg", "Ctrl");
     if (verbose)
-        pout(" %-5s %10s %11s %6s", "CMD", "Start", "Blocks", "Size");
+        pout(" %-5s %10s %11s %6s %-8s", "CMD", "Start", "Blocks", "Size", "FS");
     pout("\n");
 
     pout("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
            "------------", "-------------", "----", "----", "---", "---",
            "----------", "----", "-----", "-----", "----------");
     if (verbose)
-        pout(" %-5s %10s %11s %6s", "-----", "----------", "-----------", "------");
+        pout(" %-5s %10s %11s %6s %-8s", "-----", "----------", "-----------", "------",
+             "--------");
     pout("\n");
 
     for (row = 0; row < count; row++) {
@@ -293,19 +312,21 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                ctrl_str(pe));
         if (verbose) {
             /* MiB, falling back to kiB below one: an 880K DD floppy used
-             * to read as 0M. Both units are binary, a block being 512 bytes,
-             * and kiB only appears under 1024 so the field stays five wide. */
-            unsigned long size = (unsigned long)(pe->pe_BlockCount / 2048);
+             * to read as 0M. Both units are binary, and kiB only appears
+             * under 1024 so the field stays five wide. Blocks are 512 bytes
+             * unless a layout 6 publisher says otherwise. */
+            int shift = (g_layout6 && pe->pe_BlockShift) ? pe->pe_BlockShift : 9;
+            unsigned long size = (unsigned long)(pe->pe_BlockCount >> (20 - shift));
             char unit = 'M';
             if (size == 0) {
-                size = (unsigned long)(pe->pe_BlockCount / 2);
+                size = (unsigned long)((pe->pe_BlockCount << shift) >> 10);
                 unit = 'K';
             }
-            pout(" %-5s %10lu %11lu %5lu%c",
+            pout(" %-5s %10lu %11lu %5lu%c %-8s",
                    cmd_name(pe->pe_ReadMode),
                    (unsigned long)pe->pe_StartLBA,
                    (unsigned long)pe->pe_BlockCount,
-                   size, unit);
+                   size, unit, fs_str(pe));
         }
         pout("\n");
     }
@@ -315,7 +336,7 @@ static void usage(void)
 {
     pout("lsptres " STR(VERSION) " - list partition.resource\n"
            "Usage: lsptres [VERBOSE|V]\n"
-           "  VERBOSE (V)  also show CMD / Start / Blocks / Size (lines may wrap)\n"
+           "  VERBOSE (V)  also show CMD / Start / Blocks / Size / FS (lines may wrap)\n"
            "\n"
            "Name:  partition name, plus \">dosname\" when mounted under another name\n"
            "Src:   MBR GPT RDB FLT   (partition scheme)\n"
@@ -326,7 +347,8 @@ static void usage(void)
            "Ctrl:  CONTROL string resolved for this mount\n"
            "DosType: the DosType the mount uses - for a mounted partition the\n"
            "       one its node carries, else the one detected on the card\n"
-           "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\n");
+           "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\n"
+           "FS:    (verbose) filesystem the mounted handler found, e.g. FAT32\n");
 }
 
 static int run(void)
@@ -354,11 +376,11 @@ static int run(void)
      * (struct Library lib_PosSize at offset 18; header grew 94 -> 98) */
     {
         UWORD possize = *(UWORD *)((UBYTE *)res + 18);
-        if (possize >= 98 && res->pr_Layout >= 3)
-            have_nodedt = 1;
-        if (possize >= 98 && res->pr_Layout >= 4)
-            g_layout4 = 1;
-        if (possize >= 98 && res->pr_Layout > PTR_LAYOUT_KNOWN)
+        UWORD layout = possize >= 98 ? res->pr_Layout : 0;
+        have_nodedt = layout >= 3;
+        g_layout4 = layout >= 4;
+        g_layout6 = layout >= 6;
+        if (layout > PTR_LAYOUT_KNOWN)
             pout("note: resource layout v%u is newer than this tool (v%u); "
                    "appended fields are not shown\n",
                    res->pr_Layout, PTR_LAYOUT_KNOWN);

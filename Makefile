@@ -1,16 +1,16 @@
-VERSION = 20261007
-DATE = 07.10.2026
+VERSION = 20261108-dev
+DATE = 08.11.2026
 
 PLIB_MAJOR = 2
-PLIB_MINOR = 2
-PLIB_VERSION_SUFFIX =
-PLIB_DATE  = 03.10.2026
+PLIB_MINOR = 3
+PLIB_VERSION_SUFFIX = -dev
+PLIB_DATE  = 08.11.2026
 PLIB_VERSION = $(PLIB_MAJOR).$(PLIB_MINOR)$(PLIB_VERSION_SUFFIX)
 
 LSPTRES_MAJOR = 1
-LSPTRES_MINOR = 2
-LSPTRES_VERSION_SUFFIX =
-LSPTRES_DATE = 03.10.2026
+LSPTRES_MINOR = 3
+LSPTRES_VERSION_SUFFIX = -dev
+LSPTRES_DATE = 08.11.2026
 LSPTRES_VERSION = $(LSPTRES_MAJOR).$(LSPTRES_MINOR)$(LSPTRES_VERSION_SUFFIX)
 
 PLIB_NAME    = ptable.library
@@ -215,7 +215,8 @@ check-lha:
 # Each script sweeps both CPU tiers and both flavours itself.
 
 TEST_CHECKS = audit_cold_registration.py audit_hunk_bounds.py parts_walker.py \
-              unlink_paths.py unlink_free_entry.py
+              scan_device.py mount_device.py act_binding.py umul32.py unlink_paths.py \
+              unlink_free_entry.py
 
 # Gated on the dependency report: two providers of the amitools and machine68k
 # imports overwrite each other, and a suite that runs anyway passes or fails by

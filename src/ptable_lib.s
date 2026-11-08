@@ -58,6 +58,7 @@ InitResident	= -102
 Forbid		= -132
 Permit		= -138
 FindName	= -276
+TypeOfMem	= -534
 AllocMem	= -198
 FreeMem		= -210
 AddHead		= -240
@@ -147,11 +148,18 @@ IO_Offset	= 44
 IO_Sizeof	= 56
 
 TD_CHANGESTATE	= 14
+TD_GETGEOMETRY	= 22			;CMD_NONSTD+13
+
+;struct DriveGeometry (TD_GETGEOMETRY payload)
+DG_SectorSize	= 0
+DG_TotalSectors	= 4
+DG_Sizeof	= 32
 CMD_READ	= 2
 TD_READ64	= 24
 HD_SCSICMD	= 28
 NSCMD_TD_READ64	= $c000
 IOERR_NOCMD	= -3
+IOERR_BADADDRESS = -5
 
 ;struct SCSICmd (HD_SCSICMD payload)
 scsi_Data	= 0
@@ -227,6 +235,7 @@ s_functable:
 	dc.w	RegisterPartition-s_functable
 	dc.w	MarkAbsent-s_functable
 	dc.w	UnregisterPartition-s_functable
+	dc.w	SetPartitionFs-s_functable
 	dc.w	-1
 
 ;--- s_initfunc: called by Exec.MakeLibrary scaffolding ----

@@ -1,6 +1,6 @@
 # ptable.library: unified partition-table library
 
-`ptable.library` parses every partition scheme a removable card might carry (**RDB**, **MBR**, **GPT**, and the partition-table-less **flat** superfloppy, a whole-disk FAT volume) and publishes the result into `partition.resource`. Any driver or handler reads the layout from there instead of parsing the card itself, so one parse is shared rather than repeated.
+`ptable.library` parses every partition scheme a removable card might carry (**RDB**, **MBR**, **GPT**, and **flat**, a medium without a partition table) and publishes the result into `partition.resource`. Any driver or handler reads the layout from there instead of parsing the card itself, so one parse is shared rather than repeated.
 
 You never run it yourself; other components open it. This document explains what it does, what you see when it works, and how its behaviour is configured. The `lsptres` tool (see [`lsptres.md`](lsptres.md)) shows what it has discovered at runtime. The library ships alongside its consumer `compactflash.device`, or embedded in a Kickstart ROM for cold-boot autoboot (see the [amigaos-kickstart-builder](https://github.com/pulchart/amigaos-kickstart-builder) repo).
 
@@ -11,6 +11,10 @@ Two jobs, at two different times.
 **Cold-boot autoboot.** At Kickstart cold start, before DOS exists, the `compactflash.autoboot` cold stub (a romtag inside `compactflash.automount`) calls `BootScanPartitions`. The library scans the card, publishes every partition it finds into `partition.resource`, loads any filesystem handlers stored in the RDB into `FileSystem.resource`, and then registers the **RDB** partitions: the bootable ones with `AddBootNode` so they appear in the Early Startup boot menu, the rest with `AddDosNode`. This is what lets you boot straight off an RDB-partitioned card in the PCMCIA slot.
 
 MBR, GPT and flat partitions are published but not registered at cold boot: DOS does not exist yet, so their mount configuration cannot be read. The DOS-time automount mounts them a moment later.
+
+A **flat** row covers a whole medium without a partition table, sized from `TD_GETGEOMETRY` (0 when the device does not report it). When block 0 starts with an Amiga DosType (three letters `A`-`Z` and a byte below `$20`, e.g. `DOS\1`, `PFS\3`, `SFS\0`), the row carries that DosType and its node covers the whole medium, which needs the size. Any other block 0, with or without a FAT boot block or `$55AA`, gives `FAT\0` and the auto-detect node; the handler reads block 0 and decides. Block 0 is an MBR only when every slot status byte is `$00` or `$80` and a slot has a type.
+
+**Block size.** The scan asks the device for its block size (`TD_GETGEOMETRY`) and reads whole blocks of 512, 1024, 2048 or 4096 bytes; a device that reports no size or another one is read in 512-byte blocks. Start and size are published in the device's blocks, and `pe_BlockShift` (layout 6) records the size. An RDB whose `rdb_BlockBytes` differs from the device's block size is not walked and the medium gets no row; a LoadSeg block carries its `SummedLongs` minus five longs of filesystem code.
 
 Registering a partition needs a handler for its filesystem already in `FileSystem.resource`. FAT partitions match any registered `FAT\x` handler, every other filesystem must match its DosType exactly. With no handler the partition stays published but unmounted, listed by `lsptres` as `P----`.
 
@@ -121,7 +125,7 @@ BootPri, stored in the partition environment, does not decide bootability; it or
 
 **2. The consumer's mount configuration (`MountCfg`, DOS-time path).** `MountPartitions` takes an optional `MountCfg` supplying a global mount `Flags` value, a global `CONTROL` string, a per-filesystem override table, and the pair `mc_NodeDosType` / `mc_NodeHandler`. The library resolves each partition's `Flags` and `CONTROL` by its DosType (matching the high three bytes, e.g. `FAT\0`), falling back to the global value. Passing `0` selects cold-boot defaults.
 
-`mc_NodeDosType` and `mc_NodeHandler` decide **which filesystem serves a partition** whose envec this library synthesized, i.e. one from an MBR, GPT or flat (whole-disk FAT) card rather than an RDB. They are described under [Choosing the filesystem](#choosing-the-filesystem) below.
+`mc_NodeDosType` and `mc_NodeHandler` decide **which filesystem serves a partition** whose envec this library synthesized, i.e. one from an MBR, GPT or flat card rather than an RDB. They are described under [Choosing the filesystem](#choosing-the-filesystem) below.
 
 For `compactflash.device` these values come from `ENV:cfd.prefs`: the `FLAGS` and `CONTROL` keys, global and `_<fs>` per filesystem. So to change how hotplugged cards mount, you edit `cfd.prefs`, not `ptable.library`. The resolved values are recorded per partition and shown live by `lsptres` in its `MFlg` and `Ctrl` columns.
 
@@ -129,16 +133,25 @@ The full user-facing reference for the `cfd.prefs` keys, plus deployment default
 
 ### Choosing the filesystem
 
-`mc_NodeDosType` and `mc_NodeHandler` decide which filesystem serves a partition that came from an MBR or GPT table or a flat (whole-disk FAT) card. They apply to FAT-family entries only, and never to RDB: an RDB envec is the card's own, its `de_LowCyl`/`de_HighCyl` are real cylinders against real `de_Surfaces`/`de_BlocksPerTrack`, and writing block counts into those fields would be nonsense.
+`mc_NodeDosType` and `mc_NodeHandler` decide which filesystem serves a partition that came from an MBR or GPT table or a flat card. They apply to FAT entries only, and never to RDB: an RDB envec is the card's own, its `de_LowCyl`/`de_HighCyl` are real cylinders against real `de_Surfaces`/`de_BlocksPerTrack`, and writing block counts into those fields would be nonsense.
 
 - **Neither set:** the envec stays exactly as the scan built it and the handler comes from `FileSystem.resource`. This is the default and is unchanged.
-- **`mc_NodeDosType` set:** the node carries that DosType and gets the partition's own block range in `de_LowCyl`/`de_HighCyl`. The handler still comes from `FileSystem.resource`.
+- **`mc_NodeDosType` set:** the node carries that DosType and gets the partition's own block range in `de_LowCyl`/`de_HighCyl`. The handler still comes from `FileSystem.resource`. A flat row whose size the device did not report keeps the auto-detect envec.
 - **`mc_NodeHandler` set:** the envec is untouched, so auto-detect is preserved; the path is used only if `FileSystem.resource` has nothing for the node's DosType.
 - **Both set:** that DosType, that window, and the path as the fallback for the lookup.
 
 Naming a DosType also fixes the window, and that is not two settings collapsed into one: a handler told which filesystem to be is not a handler auto-detecting its own partition, so it needs to be given the partition. The arithmetic is exact because a synthesized envec uses `Surfaces = 1`, `BlocksPerTrk = 1`, one block per cylinder. Leaving `mc_NodeDosType` at `0` leaves the envec untouched, so the default path is unchanged.
 
-`mc_NodeHandler` is consulted only when nothing in `FileSystem.resource` matches the node's DosType. The node is then built with that path in `dn_Handler` and `dn_SegList = 0`, so DOS loads the handler on first reference, exactly as a `DEVS:DOSDrivers` mount does. Resource first, path second, means that when a handler later becomes resident the path can simply be dropped from the configuration. A path that does not resolve leaves the node with no process; nothing is torn down and DOS retries on the next reference. The library copies the string, which it does not own past the call; a handler path is clamped to 23 characters and a CONTROL string to 31.
+`mc_NodeHandler` is consulted only when nothing in `FileSystem.resource` matches the node's DosType. The node is then built with that path in `dn_Handler` and `dn_SegList = 0`, so DOS loads the handler on first reference, exactly as a `DEVS:DOSDrivers` mount does. Resource first, path second, means that when a handler later becomes resident the path can simply be dropped from the configuration. A path that does not resolve leaves the node with no process; nothing is torn down and DOS retries on the next reference. The library copies the string, which it does not own past the call; a handler path longer than 23 characters builds no node, and a CONTROL string is clamped to 31.
+
+**Binding rows** (`mc_Binds`, `mc_BindCount` rows of `mc_BindSize` bytes, read when `mc_Size` >= 40) extend this to any filesystem and to RDB partitions. The first row whose DosType prefix (`bnd_Prefix`, `0` = any) and table mask (`bnd_Sources`, `1 << PES_*`, `0` = any) match the partition applies; with no match, `mc_NodeDosType`/`mc_NodeHandler` apply as above. A row gives:
+
+- `bnd_DosType`: as `mc_NodeDosType`, never applied to RDB partitions.
+- `bnd_Handler`: as `mc_NodeHandler`, for any partition. With `BNDB_FORCE` the path is used before `FileSystem.resource`, like `ForceLoad` in a mountlist.
+- `bnd_Stack`: the node's minimum `dn_StackSize`, over the default or the `FileSysEntry` value.
+- `bnd_Pri`: the node's `dn_Priority`, with `BNDB_PRI`.
+
+So an RDB partition whose filesystem is neither in the RDB nor resident mounts from a path, and a resident handler can be overridden by one on disk.
 
 A fixed window does not follow a card swap the way the auto-detect scheme does, so it belongs with a teardown detach policy rather than with `MarkAbsent`. The failure mode is benign either way: a handler re-reads the boot block at the start of its window on every media change, so a different card either genuinely has a volume at that offset or reports not-a-DOS-disk.
 
@@ -147,7 +160,7 @@ A fixed window does not follow a card swap the way the auto-detect scheme does, 
 - **Keep, `MarkAbsent`:** clear `PRESENT` but keep the DOS node and handler in memory. The entry stays listed as absent-but-mounted (`---M-`), and reinserting the same card reattaches it without re-initialising the handler. This is the native AmigaOS removable-media model. `compactflash.device` takes this path when the `UNMOUNT` key lists no recognised filesystem, `UNMOUNT NONE` being the usual spelling.
 - **Tear down, `UnmountPartitions` with a prefix list:** stop the handler, remove its DOS node (ACTION_DIE + RemDosEntry + free the node) and drop the entry from the resource. Only filesystems in the list are torn down; any other matched entry is kept and marked absent, exactly as `MarkAbsent` would leave it. With no prefix list every mounted entry for the device and unit is torn down. `compactflash.device` passes all supported filesystems by default, and an explicit `UNMOUNT` key restricts it, for example `UNMOUNT FAT`.
 
-Static mounts can be exempted from tear-down. A static mount is an entry whose DOS node the library did not build itself: a hand-mounted `DEVS:DOSDrivers` entry that claimed its partition via `RegisterPartition`, or one the mount-time name reuse adopted. The exemption is per-entry resource state: `MountPartitions` stamps the caller's `mc_UnmFlags` keep policy into the entry's `PEB_KEEPSTATIC` bit on every pass, `UnmountPartitions` obeys the bit, and `lsptres` shows it in the fifth Flags position (`S` = static mount kept on removal, `s` = static mount following the normal policy), so the display and the behaviour can never disagree. A kept mount is only marked absent, never torn down; removing its node is the user's call, not a card event's, and a full build prints `static mount kept` on serial when the rule fires. With the bit clear (the default; the cold-boot path passes no config and never stamps) a static mount follows the normal policy. `compactflash.device` exposes the policy as `UNMOUNT_STATIC 0` in `cfd.prefs`; being stamped at mount time, a change takes effect on the next insert.
+Static mounts can be exempted from tear-down. A static mount is an entry whose DOS node the library did not build itself: a hand-mounted `DEVS:DOSDrivers` entry that claimed its partition via `RegisterPartition`, one the mount-time name reuse adopted, or a hand-mounted node on the same device and unit whose blocks overlap the partition. `MountPartitions` records such a node as the entry's mount instead of starting a second handler on the same blocks, unless `MOUNT_USED` allows it; a full build prints `served by hand mount` on serial. The exemption is per-entry resource state: `MountPartitions` stamps the caller's `mc_UnmFlags` keep policy into the entry's `PEB_KEEPSTATIC` bit on every pass, `UnmountPartitions` obeys the bit, and `lsptres` shows it in the fifth Flags position (`S` = static mount kept on removal, `s` = static mount following the normal policy), so the display and the behaviour can never disagree. A kept mount is only marked absent, never torn down; removing its node is the user's call, not a card event's, and a full build prints `static mount kept` on serial when the rule fires. With the bit clear (the default; the cold-boot path passes no config and never stamps) a static mount follows the normal policy. `compactflash.device` exposes the policy as `UNMOUNT_STATIC 0` in `cfd.prefs`; being stamped at mount time, a change takes effect on the next insert.
 
 **When an unmount does not happen.** `UnmountPartitions` keeps the mount and only marks the partition absent if the handler declined `ACTION_DIE` with an error code, if it is still alive three seconds after the packet, or if the DOS device list stays busy for a second. Nothing is freed in that case: the DOS node and the handler are left as they were, and the next card removal tries again. Expect `UnmountPartitions` to return fewer entries than were mounted, and the resource to still hold `---M-` rows afterwards.
 
@@ -203,7 +216,7 @@ A FAT card at cold boot is published and left for DOS time, which is what the ot
 [MW] mounted volumes: 3
 ```
 
-`[PT] reusing handler <name>` appears in place of `mounted` when a DOS node of that name already exists and is rebound instead of created, and `[PT] mounted as <name>` when a handler overlays its own DOS name through `RegisterPartition`. A whole-disk card prints `[PT] whole-disk FAT (superfloppy)` in place of a partition-table line.
+`[PT] reusing handler <name>` appears in place of `mounted` when a DOS node of that name already exists and is rebound instead of created, and `[PT] mounted as <name>` when a handler overlays its own DOS name through `RegisterPartition`. A whole-disk card prints `[PT] whole-disk FAT (superfloppy)` in place of a partition-table line, or `[PT] whole medium, no partition table` when block 0 carries `$55AA` but neither a FAT boot block nor a partition table.
 
 The resulting `partition.resource`, listed by `lsptres` (columns explained in [`lsptres.md`](lsptres.md)):
 
@@ -260,6 +273,8 @@ RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
                   nodeDosType:d5)                                 -54
 MarkAbsent(deviceName:a1, unit:d0)                         -60
 UnregisterPartition(deviceName:a1, unit:d0, startLBA:d1, devNode:a2)  -66
+SetPartitionFs(deviceName:a1, unit:d0, startLBA:d1, devNode:a2,
+               fsName:a0)                                         -72
 ```
 
 | LVO | Returns in d0 | Call from |
@@ -271,20 +286,22 @@ UnregisterPartition(deviceName:a1, unit:d0, startLBA:d1, devNode:a2)  -66
 | `RegisterPartition` | 1 updated, 0 not found | any task, Exec context |
 | `MarkAbsent` | entries cleared | any task, Exec context |
 | `UnregisterPartition` | 1 cleared, 0 no-op | any task, Exec context |
+| `SetPartitionFs` | 1 set, 0 no-op | any task, Exec context |
 
 Notes a consumer needs:
 
 - `MarkAbsent` never blocks: it takes the resource lock with an attempt and does nothing at all if the lock is busy, so a return of 0 does not mean there were no entries.
 - `RegisterPartition` matches on device, unit and start block. `control` is a BSTR pointer, `0` for none. `nodeDosType` (d5) records the DosType the handler mounted with into `pe_NodeDosType`, `0` meaning unknown. Register inputs cannot be gated by a declared size the way `mc_` fields are, so a future input means a new LVO.
 - `UnregisterPartition` is the inverse, for a handler whose `ACTION_DIE` was accepted outside a ptable teardown: the entry returns to published-only and the partition is the automount's again; an extra-mount row is unlinked and freed. Only the registrant may clear its own entry (`devNode` must match). Like `MarkAbsent` it only attempts the lock, and skips when a teardown holds it.
-- `cfg` is a `MountCfg` (or `0` for cold-boot defaults): global `mc_Flags` and `mc_Control` plus a 0-terminated per-dostype override table, resolved by `(pe_DosType & $FFFFFF00)`, and `mc_NodeDosType` / `mc_NodeHandler`. The override row is deliberately not grown for new settings: the library strides that table with its own idea of the row size, so a caller built against a different header would desynchronise. New settings go in the `mc_` block, behind `mc_Size` - the caller's own `mc_Sizeof`, MountCfg's `de_TableSize`: a field appended in a later release is read only when the caller's declared size covers it.
+- `SetPartitionFs` lets the registrant record the filesystem it found on its partition as a C string, e.g. `"FAT32"`, in `pe_FsName`; up to 8 characters are kept, and `fsName = 0` clears it when its volume is gone. It matches like `UnregisterPartition` and only attempts the lock. `RegisterPartition` and `UnregisterPartition` clear the value. A handler checks that the library's `lib_NegSize` covers `-72` before calling it.
+- `cfg` is a `MountCfg` (or `0` for cold-boot defaults): global `mc_Flags` and `mc_Control` plus a 0-terminated per-dostype override table, resolved by `(pe_DosType & $FFFFFF00)`, `mc_NodeDosType` / `mc_NodeHandler`, and the binding rows. The override row is deliberately not grown for new settings: the library strides that table with its own idea of the row size, so a caller built against a different header would desynchronise. New settings go in the `mc_` block, behind `mc_Size` - the caller's own `mc_Sizeof`, MountCfg's `de_TableSize`: a field appended in a later release is read only when the caller's declared size covers it.
 - `prefixList` is a 0-terminated list of dostype high three bytes, e.g. `$50465300` for `PFS`.
 - `BootScanPartitions` also registers a synthetic ConfigDev (Vendor ID `65535`, Product ID `1`) when it registered at least one node, which is what puts the device in the Early Startup boot menu and in `ShowConfig`.
 - For MBR, GPT and flat partitions the mount path builds an auto-detect DeviceNode by default: `de_LowCyl = 0` and the device-scheme DosType `$464154FF`, so one persistent fat95 handler binds once and picks its partition from the trailing digit of the node name. That is how a single handler tracks any card layout across swaps.
 - `mc_NodeDosType` / `mc_NodeHandler` override that; see [Choosing the filesystem](#choosing-the-filesystem).
 - The DosType a node actually carries is recorded in `pe_NodeDosType`, and is what `lsptres` prints in its `DosType` column for a mounted partition. `pe_DosType` stays the **detected** filesystem, so `Flags`/`CONTROL`/unmount prefix matching is unaffected.
 
-**`partition.resource` layout.** Readers walk `ptr_PartList` under `Forbid()` or take `ptr_Lock`. `OpenResource` cannot negotiate versions, so the only runtime layout signal is the pair of stamps in the header, `ptr_Layout` (currently `PTR_LAYOUT_V = 5`) and `ptr_EntrySize`, plus `pe_Length` per entry. Fields are appended only, never inserted, because `lsptres` and fat95 ship separately-built offset mirrors; a consumer that needs a newer field checks the stamp and degrades if it is older. The full field layout is in [`../src/ptable_pub.i`](../src/ptable_pub.i).
+**`partition.resource` layout.** Readers walk `ptr_PartList` under `Forbid()` or take `ptr_Lock`. `OpenResource` cannot negotiate versions, so the only runtime layout signal is the pair of stamps in the header, `ptr_Layout` (currently `PTR_LAYOUT_V = 6`) and `ptr_EntrySize`, plus `pe_Length` per entry. Fields are appended only, never inserted, because `lsptres` and fat95 ship separately-built offset mirrors; a consumer that needs a newer field checks the stamp and degrades if it is older. The full field layout is in [`../src/ptable_pub.i`](../src/ptable_pub.i).
 
 **Lock order.** `ptr_Lock` is the outer lock, DOS list locks are only ever taken inside it, and a handler started by the library must not call back into a ptable LVO while starting up.
 
@@ -293,7 +310,7 @@ Notes a consumer needs:
 ## See also
 
 - [`lsptres.md`](lsptres.md): the `lsptres` CLI lists `partition.resource`, every partition this library has published, its mount state, and the resolved Flags and CONTROL.
-- `cfd.prefs`: the `FLAGS`, `CONTROL`, `DOSTYPE_FAT` and `HANDLER_FAT` keys that `compactflash.device` turns into the `MountCfg` for `MountPartitions`. Its automount guide is the worked example for choosing a filesystem.
+- `cfd.prefs`: the `FLAGS`, `CONTROL` and per-filesystem `HANDLER_<fs>`, `DOSTYPE_<fs>`, `FORCE_<fs>`, `STACK_<fs>`, `PRI_<fs>` keys that `compactflash.device` turns into the `MountCfg` for `MountPartitions`. Its automount guide is the worked example for choosing a filesystem.
 - [`compactflash.device`](https://github.com/pulchart/cfd): the primary consumer (cold-boot autoboot + hotplug automount).
 - [`fat95`](https://github.com/pulchart/fat95): reads `partition.resource` for whole-disk partition auto-detection.
 - [`../src/ptable_pub.i`](../src/ptable_pub.i): the public consumer header with full LVO, `MountCfg`, and `PartEntry` definitions.

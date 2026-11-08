@@ -43,10 +43,10 @@ DOS_Delay	= -198
 ;   Only the fields actually read by the walkers below are
 ;   defined; *_ID / *_ChkSum / *_SummedLongs are referred to by
 ;   the RDSK/PART/FSHD/LSEG signature longs (RDSK_ID, ...).
-RDB_LOCATION_LIMIT = 16
-RDB_BLOCK_BYTES	= 512
+RDB_LOCATION_LIMIT = 16			;device blocks searched for RDSK
 
 rdb_SummedLongs	= 4
+rdb_BlockBytes	= 16
 rdb_PartitionList = 28
 rdb_FileSysHeaderList = 32
 
@@ -79,6 +79,7 @@ fhb_GlobalVec	= 76
 
 FSHD_ID		= $46534844		;'FSHD'
 
+lsb_SummedLongs	= 4
 lsb_Next	= 16
 lsb_LoadData	= 20
 
@@ -251,7 +252,12 @@ PTDEC	macro
 ;     136     4   BC_MountCfg     APTR MountCfg; 0 = cold-boot defaults
 ;     140     4   BC_NodeHandler  resolved handler path for this entry
 ;                                 (0 = FileSystem.resource only)
-;     144   512   block buffer (BC_BlockBuf points here)
+;     144    32   BC_Geometry     TD_GETGEOMETRY result
+;     176     1   BC_ScanErr      a read failed during the scan's walk
+;     177     1   BC_BlockShift   log2 of the device block size (9..12)
+;     178     2   (pad to long)
+;     180     4   BC_Medium       device blocks on the medium (0 = unknown)
+;     184  4096   block buffer (BC_BlockBuf points here)
 
 BC_ExecBase	= 0
 BC_ExpBase	= 4
@@ -273,9 +279,15 @@ BC_UnmountPrefixes = 132	;ptr to 0-terminated dostype-prefix list (UnmountPartit
 BC_MountCfg	= 136		;APTR MountCfg (MountPartitions); 0 = cold-boot defaults
 BC_NodeHandler	= 140		;APTR resolved handler path C-string for the entry being
 				;mounted (0 = bind from FileSystem.resource only)
-BC_Sizeof	= 144
+BC_Geometry	= 144		;struct DriveGeometry from TD_GETGEOMETRY
+BC_ScanErr	= 176		;byte: a read failed during this scan's walk
+BC_BlockShift	= 177		;byte: log2 of the device block size, 9..12
+BC_Medium	= 180		;device blocks on the medium, 0 = unknown
+BC_Bind		= 184		;APTR binding row of the entry being built, 0 = none
+BC_BlobSize	= 188		;bytes of the blob _actBuildBlob allocated last
+BC_Sizeof	= 192
 
-BC_BUF_BYTES	= 512
+BC_BUF_BYTES	= 4096		;the largest device block read
 
 ;--- DeviceNode blob layout (built by _actBuildBlob) ---
 DN_FSSM_OFF	= 44
@@ -288,7 +300,9 @@ DN_HDLR_OFF	= 208		;24-byte handler-path BSTR (dn_Handler points here when
 				;representable. Copied per node rather than pointed
 				;at the caller's string, which it does not own past
 				;the call, and which DOS reads much later.
-DN_BLOB_SIZE	= 232
+DN_BLOB_SIZE	= 232		;fixed part; the device-name BSTR follows it
+				;(fssm_Device points there), so the node frees
+				;its own copy with the blob
 DN_HDLR_MAX	= 23		;chars a DN_HDLR_OFF BSTR holds (24 - length byte)
 
 ;-- hand-written offsets: let the assembler check the blob still tiles, and
@@ -299,7 +313,7 @@ DN_HDLR_MAX	= 23		;chars a DN_HDLR_OFF BSTR holds (24 - length byte)
 	ifne	DN_BLOB_SIZE-(DN_HDLR_OFF+24)
 	fail	"DN_BLOB_SIZE does not cover the handler BSTR"
 	endc
-	ifne	(DN_CTRL_OFF&3)|(DN_HDLR_OFF&3)
+	ifne	(DN_CTRL_OFF&3)|(DN_HDLR_OFF&3)|(DN_BLOB_SIZE&3)
 	fail	"a blob BSTR is not 4-aligned (BPTR needs it)"
 	endc
 	ifne	DN_HDLR_MAX-(DN_BLOB_SIZE-DN_HDLR_OFF-1)
@@ -326,8 +340,6 @@ dbg_boot_start:
 	dc.b	"[PT] cold boot: scanning for partitions",LF,0
 dbg_boot_no_card:
 	dc.b	"[PT] no card / no media",LF,0
-dbg_boot_no_rdb:
-	dc.b	"[PT] no partition table (not RDB/MBR/GPT/FAT)",LF,0
 dbg_boot_fs_add:
 	dc.b	"[PT] + filesystem handler ",0
 dbg_boot_part_boot:
@@ -507,6 +519,7 @@ bs_close1:
 	jsr	CloseLibrary(a6)
 
 bs_cleanup:
+	bsr	_bootFreeDevBSTR
 ;-- a ConfigDev that was never handed to AddConfigDev is still ours
 	move.l	BC_ConfigDev(a4),d0
 	beq.s	bs_nocdfree
@@ -591,7 +604,8 @@ _bou_sig_ok:
 _bou_od_ok:
 	move.b	#1,BC_DevOpen(a4)
 
-;-- poll TD_CHANGESTATE up to 5s for slow card spin-up
+;-- poll TD_CHANGESTATE up to 5s for slow card spin-up. A driver that fails
+;   the command reports nothing about the medium: the reads decide.
 	moveq.l	#50,d7
 _bou_poll:
 	lea	BC_DevIOReq(a4),a1
@@ -600,10 +614,9 @@ _bou_poll:
 	clr.b	IO_Error(a1)
 	jsr	DoIO(a6)
 	tst.b	BC_DevIOReq+IO_Error(a4)
-	bne.s	_bou_delay
+	bne.s	_bou_ok
 	move.l	BC_DevIOReq+IO_Actual(a4),d0
 	beq.s	_bou_ok			;IO_Actual=0 -> media present
-_bou_delay:
 	bsr	_bootDelay100ms
 	subq.w	#1,d7
 	bne.s	_bou_poll
@@ -664,24 +677,53 @@ _bd_bl:	subq.l	#1,d0
 	rts
 
 ;===========================================================
-; _bootReadBlock: read one 512B block by 32-bit block#.
+; _bootGeometry: TD_GETGEOMETRY into BC_Geometry.
+; In : a4 = &BootCtx (unit open), a5 = ExecBase
+; Out: d0 = IO_Error, 0 on success. BC_Geometry is cleared first, so fields
+;      a driver leaves unset read as 0.
+;===========================================================
+_bootGeometry:
+	movem.l	d1/a0-a1/a6,-(sp)
+	lea	BC_Geometry(a4),a0
+	moveq.l	#DG_Sizeof/4-1,d1
+_bgeo_clr:
+	clr.l	(a0)+
+	dbf	d1,_bgeo_clr
+	lea	BC_DevIOReq(a4),a1
+	move.w	#TD_GETGEOMETRY,IO_Command(a1)
+	move.l	#DG_Sizeof,IO_Length(a1)
+	lea	BC_Geometry(a4),a0
+	move.l	a0,IO_Data(a1)
+	clr.l	IO_Actual(a1)
+	clr.b	IO_Error(a1)
+	move.l	a5,a6
+	jsr	DoIO(a6)
+	moveq.l	#0,d0
+	move.b	BC_DevIOReq+IO_Error(a4),d0
+	movem.l	(sp)+,d1/a0-a1/a6
+	rts
+
+;===========================================================
+; _bootReadBlock: read one device block into BC_BlockBuf.
 ;
-; Input:  d0 = block# (0..16M), a4 = &BootCtx
+; Input:  d0 = block number, a4 = &BootCtx (BC_BlockShift set)
 ; Output: d0 = 0 on success, nonzero (IO_Error) otherwise
 ;
-; Wraps _bootReadBytes64 so reads survive partition starts
-; that wrap past 4 GiB in 32-bit IO_Offset.
+; The byte offset is 64 bits wide, so blocks past 4 GiB read.
 ;===========================================================
 _bootReadBlock:
-	movem.l	d1-d2/a1,-(sp)
-	moveq.l	#0,d1			;high32 = 0 (block# always small)
-	add.l	d0,d0			;*2 via add.l (faster than lsl.l #1)
-	lsl.l	#8,d0			;d0 = block * 512 (low32)
-	exg	d0,d1			;d0=high32=0, d1=low32
-	move.l	#RDB_BLOCK_BYTES,d2
+	movem.l	d1-d3/a1,-(sp)
+	moveq.l	#0,d3
+	move.b	BC_BlockShift(a4),d3
+	move.l	d0,d1
+	lsl.l	d3,d1			;d1 = low32 of the byte offset
+	rol.l	d3,d0
+	eor.l	d1,d0			;d0 = high32: the bits rotated out
+	moveq.l	#1,d2
+	lsl.l	d3,d2			;d2 = block size
 	move.l	BC_BlockBuf(a4),a1
 	bsr	_bootReadBytes64
-	movem.l	(sp)+,d1-d2/a1
+	movem.l	(sp)+,d1-d3/a1
 	rts
 
 ;===========================================================
@@ -689,10 +731,11 @@ _bootReadBlock:
 ;
 ; The read command varies by device: modern drivers (compactflash,
 ; scsi.device) take NSCMD_TD_READ64, floppy drivers (mfm.device) only
-; CMD_READ, and old controllers sit in between. On the first read we
-; probe NSCMD_TD_READ64 -> TD_READ64 -> HD_SCSICMD -> CMD_READ, keep the
-; first method that completes a read (any error moves on; CMD_READ is the
-; forced last resort), and cache it in BC_ReadMode for the rest of the scan.
+; CMD_READ, and old controllers sit in between. Until a read succeeds we
+; probe NSCMD_TD_READ64 -> TD_READ64 -> HD_SCSICMD -> CMD_READ and cache the
+; first method that completes a read in BC_ReadMode. A negative IOERR_ code
+; moves to the next method; a positive (device or medium) error is retried
+; once with the same method first. When every method fails nothing is cached.
 ;
 ; Input : d0.l = high32, d1.l = low32, d2.l = bytes,
 ;         a1   = destination, a4 = &BootCtx
@@ -717,10 +760,16 @@ _brb_probe:
 	bsr	_brb_try		;d0 = IO_Error
 	tst.b	d0
 	beq.s	_brb_cache		;this method actually read -> use it
-	cmp.b	#4,d6
-	beq.s	_brb_cache		;CMD_READ is the last resort (cache anyway)
+	bmi.s	_brb_next		;IOERR_: the method does not work here
+	move.l	d6,d0
+	bsr	_brb_try		;device error: once more, same method
+	tst.b	d0
+	beq.s	_brb_cache
+_brb_next:
 	addq.l	#1,d6
-	bra.s	_brb_probe
+	cmp.b	#4,d6
+	bls.s	_brb_probe
+	bra.s	_brb_ret		;all failed: d0 = last error, nothing cached
 _brb_cache:
 	move.b	d6,BC_ReadMode(a4)
 	bra.s	_brb_ret
@@ -743,6 +792,8 @@ _brb_try:
 	cmp.b	#3,d0
 	beq.s	_brt_scsi
 ;-- method 4: CMD_READ (32-bit byte offset; low32 only)
+	tst.l	d3
+	bne.s	_brt_far		;offset beyond its reach
 	move.w	#CMD_READ,IO_Command(a0)
 	move.l	d4,IO_Offset(a0)
 	move.l	d5,IO_Length(a0)
@@ -772,12 +823,15 @@ _brt_err:
 	moveq.l	#0,d0
 	move.b	BC_DevIOReq+IO_Error(a4),d0
 	rts
+_brt_far:
+	move.l	#IOERR_BADADDRESS&$FF,d0
+	rts
 
 ;-- _brb_scsi10: HD_SCSICMD READ(10). a0 = IOReq, d3=hi d4=lo (byte
-;   offset), d5=len, a3=dest, a6=ExecBase. SCSICmd + 10-byte CDB on stack.
-;   Preserves d3-d5/a0/a3 (caller's working values); clobbers d0-d1/a1-a2.
+;   offset), d5=len, a3=dest, a4=ctx, a6=ExecBase. SCSICmd + 10-byte CDB on
+;   stack. Preserves d3-d5/a0/a3 (caller's working values).
 _brb_scsi10:
-	movem.l	d0-d1/a1-a2,-(sp)
+	movem.l	d0-d2/a1-a2,-(sp)
 	lea	-48(sp),sp		;scratch: SCSICmd(30) + CDB(10) + pad
 	move.l	sp,a2			;a2 = SCSICmd
 	lea	scsi_Sizeof(a2),a1	;a1 = CDB (after the struct)
@@ -791,19 +845,18 @@ _brb_scsi10:
 	move.l	d0,20(a2)
 	move.l	d0,24(a2)
 	move.l	d0,28(a2)
-;-- LBA = byte offset >> 9 (block-aligned); 32-bit reach is plenty
+;-- LBA = byte offset >> BlockShift (block-aligned); high32 below the block
+;   size keeps the LBA within the 32 bits READ(10) carries
+	moveq.l	#0,d2
+	move.b	BC_BlockShift(a4),d2
 	move.l	d4,d0
-	lsr.l	#8,d0
-	lsr.l	#1,d0			;d0 = low32 >> 9
+	lsr.l	d2,d0			;d0 = low32 >> shift
 	move.l	d3,d1
-	lsl.l	#8,d1
-	lsl.l	#8,d1
-	lsl.l	#7,d1			;d1 = high32 << 23
+	ror.l	d2,d1			;d1 = high32 << (32 - shift)
 	or.l	d1,d0			;d0 = LBA (blocks)
 ;-- length in blocks
 	move.l	d5,d1
-	lsr.l	#8,d1
-	lsr.l	#1,d1			;d1 = len >> 9
+	lsr.l	d2,d1
 ;-- build the CDB
 	move.b	#$28,(a1)		;READ(10)
 	clr.b	1(a1)
@@ -832,28 +885,109 @@ _brb_scsi10:
 	move.l	a0,a1
 	jsr	DoIO(a6)
 	lea	48(sp),sp		;free scratch
-	movem.l	(sp)+,d0-d1/a1-a2
+	movem.l	(sp)+,d0-d2/a1-a2
 	rts
 
 ;===========================================================
-; _bootChecksum: sum of first d1 longs of buffer (a0).
-; Returns d0 = 0 if checksum valid, nonzero otherwise.
+; _bootBlockOK: RDB block sanity. SummedLongs lies within d1 and the longs
+; of one device block, and the first SummedLongs longs add up to zero.
+; In : a0 = block, d1 = fewest summed longs the caller relies on (>= 1),
+;      a4 = &BootCtx (BC_BlockShift)
+; Out: d0 = 0 and Z set when valid
 ;===========================================================
-_bootChecksum:
-	movem.l	d2/a2,-(sp)
+_bootBlockOK:
+	movem.l	d1-d2/a2,-(sp)
+	move.l	4(a0),d2		;SummedLongs
+	cmp.l	d1,d2
+	blo.s	_bbo_bad
+	moveq.l	#0,d0
+	move.b	BC_BlockShift(a4),d0
+	subq.l	#2,d0
+	moveq.l	#1,d1
+	lsl.l	d0,d1			;d1 = longs per block
+	cmp.l	d1,d2
+	bhi.s	_bbo_bad
 	move.l	a0,a2
 	moveq.l	#0,d0
-	move.l	d1,d2
 	subq.l	#1,d2
-	bmi.s	_bcs_end
-_bcs_loop:
+_bbo_sum:
 	add.l	(a2)+,d0
-	dbra	d2,_bcs_loop
-_bcs_end:
-	movem.l	(sp)+,d2/a2
-	tst.l	d0
+	dbra	d2,_bbo_sum
+	bra.s	_bbo_out
+_bbo_bad:
+	moveq.l	#1,d0
+_bbo_out:
+	movem.l	(sp)+,d1-d2/a2		;Z still from add.l/moveq
 	rts
 
+
+;===========================================================
+; _bootBStrCopy: copy the BSTR at a0 to a1, length byte included.
+; _bootBStrCopy31: the same, at most 31 characters.
+; Clobbers d0/a0/a1.
+;===========================================================
+_bootBStrCopy31:
+	moveq.l	#31,d0
+	cmp.b	(a0),d0
+	bls.s	_bsc_len
+	move.b	(a0),d0
+_bsc_len:
+	addq.l	#1,a0
+	move.b	d0,(a1)+
+	bra.s	_bsc_next
+_bootBStrCopy:
+	moveq.l	#0,d0
+	move.b	(a0),d0			;length byte + d0 characters
+_bsc_loop:
+	move.b	(a0)+,(a1)+
+_bsc_next:
+	dbra	d0,_bsc_loop
+	rts
+
+;===========================================================
+; _bootDevInfo: first node of the DOS device list, found under Forbid
+; without opening dos.library.
+; In : a6 = ExecBase, Forbid held ; Out: d0 = di_DevInfo BPTR, 0 = no DOS
+; Clobbers d1/a0/a1.
+;===========================================================
+_bootDevInfo:
+	lea	378(a6),a0		;ExecBase LibList
+	lea	DosName(pc),a1
+	jsr	FindName(a6)
+	tst.l	d0
+	beq.s	_bdi_out		;no DOS yet
+	move.l	d0,a0
+	move.l	34(a0),d0		;dl_Root (APTR RootNode)
+	beq.s	_bdi_out
+	move.l	d0,a0
+	move.l	24(a0),d0		;rn_Info (BPTR DosInfo)
+	beq.s	_bdi_out
+	lsl.l	#2,d0
+	move.l	d0,a0
+	move.l	4(a0),d0		;di_DevInfo (BPTR first DosList node)
+_bdi_out:
+	rts
+
+;===========================================================
+; _bootFreeDevBSTR: free BC_DevNameBSTR; every node carries its own copy.
+; In : a4 = &BootCtx, a5 = ExecBase. Preserves d0-d1/a0-a1/a6.
+;===========================================================
+_bootFreeDevBSTR:
+	movem.l	d0-d1/a0-a1/a6,-(sp)
+	move.l	BC_DevNameBSTR(a4),d0
+	beq.s	_bfdb_out
+	clr.l	BC_DevNameBSTR(a4)
+	lsl.l	#2,d0
+	move.l	d0,a1
+	moveq.l	#0,d0
+	move.b	(a1),d0
+	addq.l	#4,d0			;length byte + chars, rounded up to a long
+	and.w	#~3,d0
+	move.l	a5,a6
+	jsr	FreeMem(a6)
+_bfdb_out:
+	movem.l	(sp)+,d0-d1/a0-a1/a6
+	rts
 
 ;===========================================================
 ; _bootMakeExecBSTR: allocate and fill a BSTR copy of a
@@ -867,9 +1001,8 @@ _bcs_end:
 ; Input : a0 = NUL-terminated C string, a4 = &BootCtx,
 ;         a6 = ExecBase
 ; Output: d0 = BPTR (already >>2) to BSTR, or 0 on failure
-;         (Allocation is small and intentionally leaked: it must
-;          outlive BootCtx for FSSM consumers to keep using it.
-;          Total leak per scan is name_length + 4 bytes.)
+;         (Freed by _bootFreeDevBSTR at the end of the call; each node
+;          copies it into its blob.)
 ;===========================================================
 _bootMakeExecBSTR:
 	movem.l	d1-d3/a0-a2,-(sp)
@@ -977,20 +1110,7 @@ _bdn_dup:
 ;   so a cold-only walk misses every mount made since boot. Same Forbid;
 ;   dos.library's base via FindName, no open count for a transient look.
 _bdn_dos:
-	lea	378(a6),a0		;ExecBase LibList
-	lea	DosName(pc),a1
-	jsr	FindName(a6)
-	tst.l	d0
-	beq.s	_bdn_unique		;no DOS yet -> cold phase, eb list was it
-	move.l	d0,a1
-	move.l	34(a1),d0		;dl_Root (APTR RootNode)
-	beq.s	_bdn_unique
-	move.l	d0,a1
-	move.l	24(a1),d0		;rn_Info (BPTR DosInfo)
-	beq.s	_bdn_unique
-	lsl.l	#2,d0
-	move.l	d0,a1
-	move.l	4(a1),d0		;di_DevInfo (BPTR first DosList node)
+	bsr	_bootDevInfo		;d0 = first DosList node (BPTR)
 _bdn_dwalk:
 	tst.l	d0
 	beq.s	_bdn_unique		;list end -> name is unique
@@ -1081,20 +1201,7 @@ _bfn_next:
 ;   same Forbid; dos.library's base comes from FindName (a transient look
 ;   needs no open count).
 _bfn_dos:
-	lea	378(a6),a0		;ExecBase LibList
-	lea	DosName(pc),a1
-	jsr	FindName(a6)
-	tst.l	d0
-	beq.s	_bfn_no2		;no DOS yet -> the eb list was everything
-	move.l	d0,a1
-	move.l	34(a1),d0		;dl_Root (APTR RootNode)
-	beq.s	_bfn_no2
-	move.l	d0,a1
-	move.l	24(a1),d0		;rn_Info (BPTR DosInfo)
-	beq.s	_bfn_no2
-	lsl.l	#2,d0
-	move.l	d0,a1
-	move.l	4(a1),d0		;di_DevInfo (BPTR first DosList node)
+	bsr	_bootDevInfo		;d0 = first DosList node (BPTR)
 _bfn_dwalk:
 	tst.l	d0
 	beq.s	_bfn_no2		;list end -> not found
@@ -1499,22 +1606,28 @@ _bdd_done:
 	rts
 
 ;-- Print " (<dostype>, <MB> MB)" + LF for the PartEntry in a3.
-;   MB = pe_BlockCount >> 11 (512-byte sectors -> MiB).
+;   MB = pe_BlockCount >> (20 - block shift); shift 0 means 9 (512 bytes).
 _bootDebugPartTail:
-	movem.l	d0/a0,-(sp)
+	movem.l	d0-d1/a0,-(sp)
 	lea	s_pt_lparen(pc),a0
 	bsr	_bootDebug
 	move.l	pe_DosType(a3),d0
 	bsr	_bootDebugDosType
 	lea	s_pt_comma(pc),a0
 	bsr	_bootDebug
+	moveq.l	#0,d1
+	move.b	pe_BlockShift(a3),d1
+	bne.s	_bdpt_shift
+	moveq.l	#9,d1
+_bdpt_shift:
+	neg.l	d1
+	add.l	#20,d1
 	move.l	pe_BlockCount(a3),d0
-	lsr.l	#8,d0
-	lsr.l	#3,d0
+	lsr.l	d1,d0
 	bsr	_bootDebugDec32
 	lea	s_pt_mbnl(pc),a0
 	bsr	_bootDebug
-	movem.l	(sp)+,d0/a0
+	movem.l	(sp)+,d0-d1/a0
 	rts
 
 s_pt_lparen:	dc.b	" (",0

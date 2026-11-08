@@ -3,8 +3,8 @@
 ;
 ; Parses the MBR (primary slots and the EBR chain) and the GPT primary header
 ; into a caller-supplied buffer of PartRec. Holds no globals:
-; the caller passes a 512-byte block-reader callback and the
-; output buffer. 512-byte sectors are assumed (CF cards).
+; the caller passes a block-reader callback and the output buffer.
+; LBAs are device blocks; the GPT walker takes the block size.
 ;
 ; ptable.library includes this; fat95 reaches it at runtime via
 ; the ScanPartitions LVO (it does not include this file).
@@ -34,6 +34,10 @@ REVL	macro
 ; Output: d0 = record count
 ; Preserves d2-d7/a2-a6 (a0/a1 scratch).
 ;===========================================================
+	ifne	PART_MAX_REC-100
+	fail	"the index budget of 100 no longer bounds the record count"
+	endc
+
 _partScanMBR:
 	movem.l	d2-d7/a2/a5,-(sp)	;a2 advances as the output cursor
 	moveq.l	#0,d6			;d6 = record count
@@ -42,8 +46,6 @@ _partScanMBR:
 	lea	446(a0),a5		;a5 = &slot 0
 	moveq.l	#0,d4			;d4 = slot index 0..3
 _psm_slot:
-	cmp.l	#PART_MAX_REC,d6
-	bhs.w	_psm_done
 	move.b	4(a5),d0
 	lea	_psm_ext(pc),a1
 	bsr	_psm_intype
@@ -69,9 +71,8 @@ _psm_next:
 	beq.s	_psm_done
 	move.l	d5,d7			;d7 = current EBR LBA
 _psm_ebr:
-	cmp.l	#PART_MAX_REC,d6
-	bhs.s	_psm_done
-	cmp.l	#100,d4			;same two-digit index budget as GPT
+	cmp.l	#100,d4			;same two-digit index budget as GPT;
+					;records never outnumber indexes
 	bhs.s	_psm_done
 	move.l	d7,d0
 	jsr	(a3)
@@ -149,23 +150,33 @@ _psm_it_no:
 	moveq.l	#1,d1			;Z clear: not listed
 	rts
 
-;-- MBR type bytes: FAT12/16 01/04/06, FAT32 0b/0c, FAT16 LBA 0e;
+;-- MBR type bytes: FAT12/16 01/04/06, FAT32 0b/0c, FAT16 LBA 0e, 07 as
+;   GPT basic data (the handler checks the file system signature);
 ;   extended CHS 05, LBA 0f, Linux 85
-_psm_fat:	dc.b	$01,$04,$06,$0b,$0c,$0e,0
+_psm_fat:	dc.b	$01,$04,$06,$0b,$0c,$0e,$07,0
 _psm_ext:	dc.b	$05,$0f,$85,0
 	even
 
 ;===========================================================
 ; _partScanGPT - walk the GPT primary header + entry array.
 ;
-; Input : a2 = &PartRec output buffer, a3 = block-reader callback
-;              (d0 = block LBA -> d0 = 0 on success & a0 = &512B
-;               buffer; preserves d2-d7/a2-a4), a4 = callback context
+; Input : d1 = log2 of the block size (9..12),
+;         a2 = &PartRec output buffer, a3 = block-reader callback
+;              (d0 = block LBA -> d0 = 0 on success & a0 = &block
+;               buffer; preserves d2-d7/a2-a4), a4 = callback context.
+;              The buffer must stay valid until the next call.
 ; Output: d0 = record count
 ; Preserves d2-d7/a2-a6 (a0/a1 scratch).
 ;===========================================================
 _partScanGPT:
 	movem.l	d2-d7/a5,-(sp)
+	moveq.l	#1,d0
+	lsl.l	d1,d0
+	subq.l	#1,d0
+	move.l	d0,-(sp)		;12(sp) = block size - 1
+	move.l	d1,-(sp)		;8(sp) = block shift
+	clr.l	-(sp)			;4(sp) = entry block buffer, 0 = none yet
+	clr.l	-(sp)			;0(sp) = its LBA
 	moveq.l	#0,d7			;d7 = record count
 ;-- read LBA 1 (GPT header)
 	moveq.l	#1,d0
@@ -187,7 +198,7 @@ _partScanGPT:
 	move.l	84(a1),d6		;SizeOfPartitionEntry (LE)
 	REVL	d6
 ;-- disk-supplied: accept only >= 128 and a multiple of 128 (UEFI: 128*2^n),
-;   or entries straddle the 512-byte buffer / land on odd addresses
+;   or entries straddle the block buffer / land on odd addresses
 	move.l	d6,d0
 	and.l	#$7F,d0
 	bne.w	_psg_done
@@ -200,10 +211,8 @@ _psg_eloop:
 	bhs.w	_psg_done
 	cmp.l	#100,d2			;PR_PartIndex is a byte and the node name
 	bhs.w	_psg_done		;budgets two digits: entries past 99 are skipped
-	cmp.l	#PART_MAX_REC,d7
-	bhs.w	_psg_done
-;-- byte offset = idx * entrySize; 512-byte sectors -> block = base
-;   + offset>>9, rem = offset & 511
+;-- byte offset = idx * entrySize; block = base + offset >> shift,
+;   rem = offset & (block size - 1)
 	;Overflow ends the scan: later offsets can only increase.
 	ifd	__68020__
 	move.l	d6,d0
@@ -224,16 +233,24 @@ _psg_eloop:
 	bcs.w	_psg_done		;byte offset exceeds 32 bits
 	endif	;__68020__
 	move.l	d0,d3
-	andi.l	#$1ff,d3		;d3 = byte offset within block (kept
+	and.l	12(sp),d3		;d3 = byte offset within block (kept
 					;     across the callback: preserved reg)
-	lsr.l	#8,d0
-	lsr.l	#1,d0			;d0 = offset / 512
+	move.l	8(sp),d1
+	lsr.l	d1,d0			;d0 = offset / block size
 	add.l	d4,d0			;d0 = absolute LBA of the entry block
 	bcs.w	_psg_done		;do not read a wrapped LBA
+	tst.l	4(sp)
+	beq.s	_psg_read
+	cmp.l	(sp),d0
+	beq.s	_psg_have		;entries share a block: read it once
+_psg_read:
+	move.l	d0,(sp)
 	jsr	(a3)
 	tst.l	d0
 	bne.w	_psg_done
-	move.l	a0,a1
+	move.l	a0,4(sp)
+_psg_have:
+	move.l	4(sp),a1
 	add.l	d3,a1			;a1 = &partition entry
 	tst.l	(a1)			;type GUID all-zero -> unused
 	beq.w	_psg_enext
@@ -280,6 +297,7 @@ _psg_enext:
 	bra.w	_psg_eloop
 _psg_done:
 	move.l	d7,d0
+	lea	16(sp),sp
 	movem.l	(sp)+,d2-d7/a5
 	rts
 
@@ -289,6 +307,59 @@ _psg_done:
 _psg_guids:
 	dc.l	$A2A0D0EB,$E5B93344,$87C068B6,$B72699C7
 	dc.l	$28732AC1,$1FF8D211,$BA4B00A0,$C93EC93B
+
+;===========================================================
+; _partIsMBR - is the slot table of a $55AA block a partition table?
+; Every status byte is $00 or $80 and at least one slot has a type.
+;
+; Input : a0 = &block (512 bytes)
+; Output: d0 = -1 (partition table) or 0
+; Clobbers d0/d1/a1.
+;===========================================================
+_partIsMBR:
+	lea	446(a0),a1
+	moveq.l	#3,d1
+	moveq.l	#0,d0			;d0.b = types or-ed together
+_pim_slot:
+	tst.b	(a1)
+	beq.s	_pim_status
+	cmpi.b	#$80,(a1)
+	bne.s	_pim_no
+_pim_status:
+	or.b	4(a1),d0
+	lea	16(a1),a1
+	dbra	d1,_pim_slot
+	tst.b	d0
+	beq.s	_pim_no
+	moveq.l	#-1,d0
+	rts
+_pim_no:
+	moveq.l	#0,d0
+	rts
+
+;===========================================================
+; _partAmigaType - the DosType an Amiga filesystem writes at the start of
+; its first block: three letters A-Z and a byte below $20 (DOS\1, PFS\3).
+;
+; Input : a0 = &block
+; Output: d0 = that DosType, or 0. Clobbers d1.
+;===========================================================
+_partAmigaType:
+	moveq.l	#2,d1
+_pat_l:
+	move.b	0(a0,d1.w),d0
+	cmp.b	#'A',d0
+	blo.s	_pat_no
+	cmp.b	#'Z',d0
+	bhi.s	_pat_no
+	dbf	d1,_pat_l
+	cmp.b	#$20,3(a0)
+	bhs.s	_pat_no
+	move.l	(a0),d0
+	rts
+_pat_no:
+	moveq.l	#0,d0
+	rts
 
 ;===========================================================
 ; _partIsBootBlock - FAT boot-sector sanity gate (rejects NTFS).

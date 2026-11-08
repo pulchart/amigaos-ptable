@@ -28,6 +28,7 @@
 ;   [ 60..143] DosEnvec     [144..175] dn_Name BSTR
 ;   [176..207] CONTROL BSTR (de_Control)
 ;   [208..231] handler-path BSTR (dn_Handler, when bound by name)
+;   [232..   ] device-name BSTR (fssm_Device), BC_BlobSize in all
 ; The FileSysEntry patch (handler binding) is applied here, BEFORE
 ; the caller's Add*Node (expansion's FFS auto-attach would otherwise
 ; silently replace a custom handler).
@@ -38,7 +39,14 @@ _actBuildBlob:
 ;   fssm_Device = 0 and the handler would dereference a BSTR at address 0
 	move.l	BC_DevNameBSTR(a4),d0
 	beq.w	_abb_fail
-	move.l	#DN_BLOB_SIZE,d0
+	lsl.l	#2,d0
+	move.l	d0,a0
+	moveq.l	#0,d0
+	move.b	(a0),d0
+	addq.l	#4,d0			;length byte + chars, rounded up to a long
+	and.w	#~3,d0
+	add.l	#DN_BLOB_SIZE,d0
+	move.l	d0,BC_BlobSize(a4)
 	move.l	#MEMF_PUBLIC+MEMF_CLEAR+MEMF_REVERSE,d1
 	move.l	a5,a6
 	jsr	AllocMem(a6)
@@ -58,13 +66,7 @@ _actBuildBlob:
 ;-- name BSTR from the entry (publish already clamped to 31)
 	lea	pe_NameB(a3),a0
 	lea	DN_BSTR_OFF(a2),a1
-	moveq.l	#0,d3
-	move.b	(a0),d3
-	addq.l	#1,d3			;length byte + chars
-_abb_ncp:
-	move.b	(a0)+,(a1)+
-	subq.l	#1,d3
-	bne.s	_abb_ncp
+	bsr	_bootBStrCopy
 	lea	DN_BSTR_OFF(a2),a1
 	move.l	a1,d0
 	lsr.l	#2,d0
@@ -88,13 +90,7 @@ _abb_ncp:
 	beq.s	_abb_nomname		;name unchanged -> no pe_MountName
 	lea	DN_BSTR_OFF(a2),a0	;src = actual name BSTR
 	lea	pe_MountName(a3),a1	;dst = pe_MountName
-	moveq.l	#0,d0
-	move.b	(a0),d0			;length byte
-	addq.l	#1,d0			;+ chars
-_abb_nwb:
-	move.b	(a0)+,(a1)+
-	subq.l	#1,d0
-	bne.s	_abb_nwb
+	bsr	_bootBStrCopy
 _abb_nomname:
 
 ;-- FileSysStartupMsg
@@ -103,7 +99,16 @@ _abb_nomname:
 	lsr.l	#2,d0
 	move.l	d0,28(a2)		;dn_Startup = BPTR(FSSM)
 	move.l	BC_Unit(a4),(a1)	;fssm_Unit
-	move.l	BC_DevNameBSTR(a4),4(a1) ;fssm_Device
+	move.l	BC_DevNameBSTR(a4),d0	;device name -> the blob's own BSTR
+	lsl.l	#2,d0
+	move.l	d0,a0
+	move.l	a1,-(sp)
+	lea	DN_BLOB_SIZE(a2),a1
+	move.l	a1,d1
+	lsr.l	#2,d1			;d1 = BPTR of the copy
+	bsr	_bootBStrCopy
+	move.l	(sp)+,a1
+	move.l	d1,4(a1)		;fssm_Device
 	lea	DN_ENVEC_OFF(a2),a0
 	move.l	a0,d0
 	lsr.l	#2,d0
@@ -139,17 +144,11 @@ _abb_nowin:
 
 ;-- CONTROL -> de_Control (only if the resolved pe_Control is non-empty):
 ;   copy the BSTR into the blob, point de_Control at it, raise TableSize >= 18
-	lea	pe_Control(a3),a0
-	moveq.l	#0,d0
-	move.b	(a0),d0			;control length
+	tst.b	pe_Control(a3)		;control length
 	beq.s	_abb_noctrl
 	lea	pe_Control(a3),a0	;src BSTR (len + chars)
 	lea	DN_CTRL_OFF(a2),a1	;dst in blob
-	addq.l	#1,d0			;len byte + chars
-_abb_ccp:
-	move.b	(a0)+,(a1)+
-	subq.l	#1,d0
-	bne.s	_abb_ccp
+	bsr	_bootBStrCopy
 	lea	DN_CTRL_OFF(a2),a1
 	move.l	a1,d0
 	lsr.l	#2,d0			;BPTR
@@ -166,13 +165,23 @@ _abb_noctrl:
 ;   partition. Other filesystems must match exactly.
 ;   Matching is on the NODE dostype, not the detected one: a node the caller
 ;   asked to be another filesystem must not fall through the FAT family.
+	move.l	BC_Bind(a4),d0		;FORCE row with a path: the path first
+	beq.s	_abb_fsr
+	move.l	d0,a0
+	btst	#BNDB_FORCE,bnd_Flags(a0)
+	beq.s	_abb_fsr
+	tst.l	BC_NodeHandler(a4)
+	bne.s	_abb_path
+_abb_fsr:
 	move.l	a5,a6			;ExecBase for _bootFindFSEntry
 	move.l	pe_NodeDosType(a3),d0
 	bsr	_bootFindFSEntry
 	tst.l	d0
 	bne.w	_abb_fse
 	move.l	pe_NodeDosType(a3),d0
-	and.l	#$FFFFFF00,d0
+	cmp.l	#$444F5300,d0		;DOS\0: the ROM filesystem serves it, the
+	beq.w	_abb_plain		;node stays unpatched as stock mounts it
+	clr.b	d0
 	cmp.l	#DOSTYPE_FAT,d0		;FAT is shareable: one registered handler
 					;serves any FAT\x dostype (see ptable_fs.s)
 	bne.s	_abb_path
@@ -196,7 +205,8 @@ _abb_hcp:
 	move.b	(a0)+,d3
 	beq.s	_abb_hlen
 	cmp.b	#DN_HDLR_MAX,d0
-	bhs.s	_abb_hlen		;clamp: the string is the caller's, not ours
+	bhs.s	_abb_nofs		;longer than the node holds: a cut path
+					;would name another file, so no node
 	move.b	d3,(a1)+
 	addq.b	#1,d0
 	bra.s	_abb_hcp
@@ -208,14 +218,12 @@ _abb_hlen:
 	move.l	a1,d0
 	lsr.l	#2,d0
 	move.l	d0,16(a2)		;dn_Handler = BPTR (dn_SegList left 0)
-	move.l	a2,d0
-	movem.l	(sp)+,d2-d3/a2/a6
-	rts
+	bra.s	_abb_plain
 _abb_nofs:
 ;-- no handler for this dostype: free the blob and fail so the caller leaves
 ;   the entry present-only (P---) instead of marking a handler-less node MOUNTED
 	move.l	a2,a1
-	move.l	#DN_BLOB_SIZE,d0
+	move.l	BC_BlobSize(a4),d0
 	move.l	a5,a6
 	jsr	FreeMem(a6)
 	moveq.l	#0,d0
@@ -225,6 +233,20 @@ _abb_fse:
 	move.l	d0,a1
 	move.l	a2,a0
 	bsr	_bootPatchDNfromFSE
+_abb_plain:
+;-- binding row: stack as a floor over the default or patched value, priority
+	move.l	BC_Bind(a4),d0
+	beq.s	_abb_ok
+	move.l	d0,a0
+	move.l	bnd_Stack(a0),d0
+	cmp.l	20(a2),d0
+	bls.s	_abb_pri
+	move.l	d0,20(a2)		;dn_StackSize
+_abb_pri:
+	btst	#BNDB_PRI,bnd_Flags(a0)
+	beq.s	_abb_ok
+	move.l	bnd_Pri(a0),24(a2)	;dn_Priority
+_abb_ok:
 	move.l	a2,d0
 	movem.l	(sp)+,d2-d3/a2/a6
 	rts
@@ -252,8 +274,7 @@ _actResolveCfg:
 	move.l	mc_Control(a0),d3
 	move.l	mc_Overrides(a0),d4	;override table (0 = none)
 	beq.s	_arc_store
-	move.l	pe_DosType(a3),d0
-	and.l	#$FFFFFF00,d0		;d0 = dostype prefix
+	bsr	_actPrefix		;d0 = dostype prefix
 	move.l	d4,a0			;a0 = override row
 _arc_ov:
 	move.l	ovr_Prefix(a0),d1
@@ -295,34 +316,279 @@ _arc_empty:
 	clr.b	(a1)			;empty control
 _arc_done:
 
-;-- node DosType + handler path. Default is the DosType the scan already put in
-;   the envec and no path, so a caller that configures nothing changes nothing.
-;   Both settings apply ONLY to an entry whose envec this library synthesized
-;   and which we detected as FAT:
-;     - not PES_RDB, because an RDB envec is the card's own, its LowCyl/HighCyl
-;       are real cylinders against real Surfaces/BlocksPerTrk, and pe_StartLBA /
-;       pe_BlockCount are blocks. Writing one into the other would be nonsense.
-;     - FAT family, because that is the scope this knob is defined for; another
-;       filesystem's node must not be handed a FAT handler's path.
+;-- node DosType, handler path and binding row. Default is the DosType the
+;   scan already put in the envec and no path, so a caller that configures
+;   nothing changes nothing. The first matching binding row decides; with
+;   none, mc_NodeDosType/mc_NodeHandler apply to FAT entries.
+;   A DosType never applies to PES_RDB: an RDB envec is the card's own, its
+;   LowCyl/HighCyl are real cylinders, and pe_StartLBA/pe_BlockCount are
+;   blocks. A path applies to any source.
 	move.l	pe_Envec+DE_DOSTYPE*4(a3),d0
 	moveq.l	#0,d1
+	clr.l	BC_Bind(a4)
 	move.l	BC_MountCfg(a4),d2
 	beq.s	_arc_nstore		;cold / no cfg
+	bsr	_actFindBind		;a0 = row, 0 = none
+	move.l	a0,BC_Bind(a4)
+	beq.s	_arc_implicit
+	move.l	bnd_Handler(a0),d1
+	move.l	bnd_DosType(a0),d3
+	bra.s	_arc_dt
+_arc_implicit:
 	cmp.b	#PES_RDB,pe_Source(a3)
-	beq.s	_arc_nstore
+	beq.s	_arc_nstore		;mc_Node* are for synthesized envecs only
 	move.l	pe_DosType(a3),d3
-	and.l	#$FFFFFF00,d3
+	clr.b	d3			;d3 = prefix
 	cmp.l	#DOSTYPE_FAT,d3
 	bne.s	_arc_nstore
 	move.l	d2,a0
 	move.l	mc_NodeHandler(a0),d1	;path (0 = FileSystem.resource only)
 	move.l	mc_NodeDosType(a0),d3
+_arc_dt:
 	beq.s	_arc_nstore		;no DosType named -> envec stays as scanned
+	cmp.b	#PES_RDB,pe_Source(a3)
+	beq.s	_arc_nstore
+	move.l	pe_BlockCount(a3),d4
+	beq.s	_arc_nstore		;size unknown: no fixed window possible
+	subq.l	#1,d4
+	add.l	pe_StartLBA(a3),d4
+	bcs.s	_arc_nstore		;last block past 32 bits: no window either
 	move.l	d3,d0
 _arc_nstore:
 	move.l	d0,pe_NodeDosType(a3)
 	move.l	d1,BC_NodeHandler(a4)
 	movem.l	(sp)+,d0-d4/a0-a1
+	rts
+
+;===========================================================
+; _actFindStatic: a DeviceNode on the DOS list for this device+unit whose
+; block window overlaps the entry's blocks, and that no row records yet.
+; Auto-detect FAT nodes (de_LowCyl = 0) are skipped: the name reuse in
+; _actMount owns them. dn_Startup is handler specific, so every pointer is
+; checked with TypeOfMem before it is read.
+; In : a3 = entry, a4 = &BootCtx, a5 = ExecBase
+; Out: d0 = DeviceNode or 0
+;===========================================================
+_actFindStatic:
+	movem.l	d1-d7/a0-a2/a6,-(sp)
+	move.l	pe_StartLBA(a3),d4	;d4 = first block of the entry
+	move.l	pe_BlockCount(a3),d5
+	beq.s	_afs_last
+	subq.l	#1,d5
+_afs_last:
+	add.l	d4,d5			;d5 = last block
+	bcc.s	_afs_lok
+	moveq.l	#-1,d5
+_afs_lok:
+;-- in 512-byte blocks, as the node windows below; past 32 bits saturates
+	moveq.l	#0,d1
+	move.b	pe_BlockShift(a3),d1
+	sub.l	#9,d1
+	bls.s	_afs_units		;512-byte blocks (or unstamped)
+	move.l	d4,d0
+	lsl.l	d1,d4
+	move.l	d4,d2
+	lsr.l	d1,d2
+	cmp.l	d0,d2
+	beq.s	_afs_s1
+	moveq.l	#-1,d4
+_afs_s1:
+	move.l	d5,d0
+	lsl.l	d1,d5
+	move.l	d5,d2
+	lsr.l	d1,d2
+	cmp.l	d0,d2
+	beq.s	_afs_s2
+	moveq.l	#-1,d5
+	bra.s	_afs_units
+_afs_s2:
+	moveq.l	#-1,d0			;d5 = last 512-byte block of the last block
+	lsl.l	d1,d0
+	not.l	d0
+	or.l	d0,d5
+_afs_units:
+	move.l	a5,a6
+	jsr	Forbid(a6)
+	bsr	_bootDevInfo
+	move.l	d0,d7			;d7 = first DosList node (BPTR)
+_afs_walk:
+	tst.l	d7
+	beq.w	_afs_none
+	lsl.l	#2,d7
+	move.l	d7,a2			;a2 = DosList node
+	move.l	(a2),d7			;dol_Next for the next round
+	tst.l	4(a2)			;dol_Type: DLT_DEVICE = 0
+	bne.s	_afs_walk
+	move.l	28(a2),d0		;dn_Startup
+	bsr	_afsMem			;a1 = FSSM
+	beq.s	_afs_walk
+	move.l	BC_Unit(a4),d0
+	cmp.l	(a1),d0			;fssm_Unit
+	bne.s	_afs_walk
+	move.l	a1,d6			;d6 = FSSM
+	move.l	4(a1),d0		;fssm_Device
+	bsr	_afsMem
+	beq.s	_afs_walk
+	move.l	a1,a0
+	move.l	a2,-(sp)
+	move.l	BC_DevNameBSTR(a4),d0
+	lsl.l	#2,d0
+	move.l	d0,a2
+	bsr	_bootBStrEqualCI	;Z = same device
+	move.l	(sp)+,a2
+	bne.s	_afs_walk
+	move.l	d6,a1
+	move.l	8(a1),d0		;fssm_Environ
+	bsr	_afsMem			;a1 = envec
+	beq.s	_afs_walk
+	cmp.l	#DE_HighCyl,(a1)	;TableSize must reach HighCyl
+	blo.s	_afs_walk
+	tst.l	DE_LowCyl*4(a1)
+	bne.s	_afs_fixed
+	cmp.l	#DE_DOSTYPE,(a1)
+	blo.s	_afs_fixed
+	move.l	DE_DOSTYPE*4(a1),d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_afs_walk		;auto-detect FAT node
+_afs_fixed:
+;-- recorded by a row already: ours, or registered by its handler
+	move.l	a1,-(sp)
+	move.l	a2,d0
+	bsr	_afsRecorded
+	movem.l	(sp)+,a1		;movem keeps the flags
+	bne.w	_afs_walk
+;-- window in 512-byte blocks: cylinders * Surfaces * BlocksPerTrack, in
+;   blocks of SizeBlock longs (a multiple of 128). A window past 32 bits
+;   ends at block $FFFFFFFF.
+	move.l	DE_SizeBlock*4(a1),d1
+	moveq.l	#127,d0
+	and.l	d1,d0
+	bne.w	_afs_walk
+	lsr.l	#7,d1			;d1 = 512-byte blocks per block
+	beq.w	_afs_walk
+	move.l	DE_Surfaces*4(a1),d0
+	UMUL32
+	bvs.w	_afs_walk
+	move.l	DE_BlocksPerTrk*4(a1),d1
+	UMUL32
+	bvs.w	_afs_walk
+	move.l	d0,d2			;d2 = blocks per cylinder
+	beq.w	_afs_walk
+	move.l	DE_LowCyl*4(a1),d0
+	move.l	d2,d1
+	UMUL32
+	bvs.w	_afs_walk		;starts past 32 bits: not over this entry
+	move.l	d0,d3			;d3 = first block of the node
+	moveq.l	#-1,d6			;d6 = last block of the node
+	move.l	DE_HighCyl*4(a1),d0
+	addq.l	#1,d0
+	beq.s	_afs_cmp
+	move.l	d2,d1
+	UMUL32
+	bvs.s	_afs_cmp
+	subq.l	#1,d0
+	move.l	d0,d6
+_afs_cmp:
+	cmp.l	d5,d3			;node starts after the entry ends
+	bhi.w	_afs_walk
+	cmp.l	d4,d6			;node ends before the entry starts
+	blo.w	_afs_walk
+	move.l	a2,d0
+	bra.s	_afs_out
+_afs_none:
+	moveq.l	#0,d0
+_afs_out:
+	move.l	a5,a6
+	jsr	Permit(a6)		;preserves d0
+	movem.l	(sp)+,d1-d7/a0-a2/a6
+	rts
+
+;-- _afsMem: d0 = BPTR -> a1 = address when nonzero and in system memory,
+;   Z clear; else Z set. a6 = ExecBase. Clobbers d0/d1/a0.
+_afsMem:
+	lsl.l	#2,d0
+	beq.s	_afm_out
+	move.l	d0,-(sp)
+	move.l	d0,a1
+	jsr	TypeOfMem(a6)
+	move.l	(sp)+,a1
+	tst.l	d0
+_afm_out:
+	rts
+
+;-- _afsRecorded: d0 = DeviceNode; Z clear when a row records it as its node.
+;   a5 = ExecBase. Clobbers d0/d1/a0/a1.
+_afsRecorded:
+	move.l	d0,d1
+	bsr	_partGetResource
+	tst.l	d0
+	beq.s	_afr_out
+	move.l	d0,a0
+	move.l	PTR_PartList(a0),a0
+_afr_walk:
+	tst.l	(a0)
+	beq.s	_afr_no
+	cmp.l	pe_DevNode(a0),d1
+	beq.s	_afr_yes
+	move.l	(a0),a0
+	bra.s	_afr_walk
+_afr_yes:
+	moveq.l	#1,d0
+	rts
+_afr_no:
+	moveq.l	#0,d0
+_afr_out:
+	rts
+
+;===========================================================
+; _actFindBind: the first binding row matching the entry's prefix and source.
+; In : a3 = entry, d2 = MountCfg ; Out: a0 = row, 0 = none
+;===========================================================
+_actFindBind:
+	movem.l	d0-d4,-(sp)
+	move.l	d2,a0
+	cmp.l	#mc_BindSize+4,mc_Size(a0)
+	blo.s	_afb_none
+	move.l	mc_BindSize(a0),d3
+	cmp.l	#bnd_Sizeof,d3
+	blo.s	_afb_none
+	move.l	mc_BindCount(a0),d4
+	move.l	mc_Binds(a0),d0
+	beq.s	_afb_none
+	move.l	d0,a0
+	bsr	_actPrefix
+	move.l	d0,d1			;d1 = entry prefix
+	moveq.l	#0,d2
+	move.b	pe_Source(a3),d2	;d2 = source bit
+_afb_loop:
+	subq.l	#1,d4
+	bcs.s	_afb_none
+	move.l	bnd_Prefix(a0),d0
+	beq.s	_afb_src		;0 = any prefix
+	cmp.l	d1,d0
+	bne.s	_afb_next
+_afb_src:
+	move.b	bnd_Sources(a0),d0
+	beq.s	_afb_hit		;0 = any source
+	btst	d2,d0
+	bne.s	_afb_hit
+_afb_next:
+	add.l	d3,a0
+	bra.s	_afb_loop
+_afb_none:
+	sub.l	a0,a0
+_afb_hit:
+	movem.l	(sp)+,d0-d4
+	rts
+
+;===========================================================
+; _actPrefix: d0 = the entry's detected DosType prefix (high three bytes).
+; In: a3 = entry.
+;===========================================================
+_actPrefix:
+	move.l	pe_DosType(a3),d0
+	clr.b	d0
 	rts
 
 ;===========================================================
@@ -431,7 +697,7 @@ _acd_dos:
 _acd_reg:
 	move.l	d6,pe_DevNode(a3)
 	move.l	d6,pe_BlobPtr(a3)
-	move.l	#DN_BLOB_SIZE,pe_BlobSize(a3)
+	move.l	BC_BlobSize(a4),pe_BlobSize(a3)
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
 	move.b	#1,BC_HaveNodes(a4)
@@ -441,7 +707,7 @@ _acd_reg:
 _acd_addfail:
 ;-- expansion could not link the node: free the blob, keep the entry published
 	move.l	d6,a1
-	move.l	#DN_BLOB_SIZE,d0
+	move.l	BC_BlobSize(a4),d0
 	move.l	a5,a6
 	jsr	FreeMem(a6)
 	bra.w	_acd_next
@@ -510,6 +776,8 @@ _amo_noused:
 	bne.w	_amo_next
 _amo_stamped:
 	move.b	pe_Flags(a3),d3
+	btst	#PEB_PRESENT,d3		;absent: the medium does not have it now
+	beq.w	_amo_next
 	btst	#PEB_NOMOUNT,d3
 	bne.w	_amo_next
 	btst	#PEB_MOUNTED,d3
@@ -538,6 +806,20 @@ _amo_stamped:
 	move.l	d1,a0
 	tst.l	DE_LowCyl*4(a0)
 	bne.w	_amo_create		;fixed window -> build a fresh node
+;-- and only a FAT one: another filesystem on LowCyl 0 (e.g. CrossDOS) is a
+;   hand mount over the whole device, which _amo_create records as static
+	cmp.l	#DE_DOSTYPE,(a0)
+	blo.w	_amo_create
+	move.l	DE_DOSTYPE*4(a0),d1
+	clr.b	d1
+	cmp.l	#DOSTYPE_FAT,d1
+	bne.w	_amo_create
+;-- for a FAT entry: another filesystem's entry needs its own node
+	move.l	d0,d1
+	bsr	_actPrefix
+	cmp.l	#DOSTYPE_FAT,d0
+	exg	d0,d1			;d0 = node again (exg keeps the flags)
+	bne.w	_amo_create
 	bsr	_actResolveCfg		;record MFlg/Ctrl/NodeDosType for the entry
 	move.l	d0,pe_DevNode(a3)
 	bset	#PEB_MOUNTED,d3
@@ -553,6 +835,32 @@ _amo_stamped:
 	bra.w	_amo_next
 
 _amo_create:
+;-- a hand-mounted node already serving these blocks: record it as the row's
+;   static mount instead of starting a second handler on the same blocks,
+;   unless the caller lets a mount claim a partition another handler serves
+	btst	#PEB_MOUNTUSED,d3
+	bne.s	_amo_build
+	bsr	_actFindStatic
+	tst.l	d0
+	beq.s	_amo_build
+	move.l	d0,pe_DevNode(a3)
+	move.l	d0,a0
+	move.l	40(a0),d0		;dn_Name (BPTR BSTR)
+	lsl.l	#2,d0
+	move.l	d0,a0
+	lea	pe_MountName(a3),a1
+	bsr	_bootBStrCopy31
+	bset	#PEB_MOUNTED,d3
+	move.b	d3,pe_Flags(a3)
+	ifd	DEBUG
+	lea	dbg_pt_served(pc),a0
+	bsr	_bootDebug
+	lea	pe_MountName(a3),a0
+	bsr	_bootDebugBStrR
+	bsr	_bootDebugPartTail
+	endc
+	bra.w	_amo_next
+_amo_build:
 	bsr	_actBuildBlob
 	tst.l	d0
 	beq.w	_amo_next
@@ -573,7 +881,7 @@ _amo_create:
 	endc
 	move.l	d6,pe_DevNode(a3)
 	move.l	d6,pe_BlobPtr(a3)
-	move.l	#DN_BLOB_SIZE,pe_BlobSize(a3)
+	move.l	BC_BlobSize(a4),pe_BlobSize(a3)
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
 	addq.l	#1,d7
@@ -581,7 +889,7 @@ _amo_create:
 _amo_addfail:
 ;-- expansion could not link the node: free the blob, keep the entry published
 	move.l	d6,a1
-	move.l	#DN_BLOB_SIZE,d0
+	move.l	BC_BlobSize(a4),d0
 	move.l	a5,a6
 	jsr	FreeMem(a6)
 _amo_next:
@@ -648,9 +956,9 @@ _aum_policy:
 					;entry for the device+unit (documented API;
 					;a caller wanting keep-everything calls
 					;MarkAbsent instead)
-	move.l	pe_DosType(a3),d5
-	and.l	#$FFFFFF00,d5
 	move.l	d0,a0
+	bsr	_actPrefix
+	move.l	d0,d5
 _aum_pfx:
 	move.l	(a0)+,d0
 	beq.s	_aum_keep		;not in list -> keep handler, mark absent

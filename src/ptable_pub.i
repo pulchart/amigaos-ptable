@@ -21,7 +21,9 @@
 ;   Exec-only. Scan and publish; never mount. May wait for PTR_Lock/device I/O.
 ;
 ; MountPartitions(deviceName:a1, unit:d0, cfg:a0) -> d0 = mounted count
-;   Process only. Start eligible unmounted entries via AddDosNode(ADNF_STARTPROC).
+;   Process only. Start present, unmounted entries via AddDosNode(ADNF_STARTPROC).
+;   A DOS-list node on the same device+unit over the entry's blocks is recorded
+;   as its static mount instead, unless mc_UnmFlags has MCUF_MOUNTUSED.
 ;   cfg = MountCfg or 0 for defaults. Resolve Flags/CONTROL by pe_DosType;
 ;   record results in pe_MountFlags/pe_Control and the node's fssm_Flags/de_Control.
 ;   mc_NodeDosType/mc_NodeHandler select the handler for synthesized FAT entries;
@@ -61,7 +63,10 @@ mc_UnmFlags	= 24			;ULONG MCUF_* bits; read only if mc_Size >= 28
 					;mount pass stamps entry policy, including
 					;already-mounted entries; older cfg leaves it
 					;unchanged
-mc_Sizeof	= 28
+mc_Binds	= 28			;APTR  binding rows (0 = none); the three
+mc_BindCount	= 32			;ULONG fields are read only if mc_Size >= 40
+mc_BindSize	= 36			;ULONG bytes per row, >= bnd_Sizeof
+mc_Sizeof	= 40
 
 MCUF_KEEPSTATIC	= 0			;keep static mounts on card removal
 					;(-> PEB_KEEPSTATIC)
@@ -80,6 +85,26 @@ ovr_Sizeof	= 16
 ;
 ; ovr_Sizeof is fixed across versions: changing it breaks table traversal.
 ; Append new settings to MountCfg, gated by mc_Size.
+;
+; Binding row: how an entry's node gets its handler. The first row whose
+; prefix and source mask match the entry applies; with none, mc_NodeDosType/
+; mc_NodeHandler apply to MBR/GPT/flat FAT entries. Rows step by mc_BindSize,
+; so a newer caller may append fields.
+bnd_Prefix	= 0			;ULONG dostype high 3 bytes; 0 = any
+bnd_Sources	= 4			;UBYTE 1<<PES_* mask; 0 = any
+bnd_Flags	= 5			;UBYTE BNDB_* bits
+;		  6..7			;(pad)
+bnd_DosType	= 8			;ULONG node DosType, fixed window; 0 = keep;
+					;never applied to RDB entries
+bnd_Handler	= 12			;APTR  handler path C-string; 0 = none.
+					;Used when no FileSysEntry matches, or first
+					;with BNDB_FORCE
+bnd_Stack	= 16			;ULONG minimum dn_StackSize; 0 = keep
+bnd_Pri		= 20			;LONG  dn_Priority, with BNDB_PRI
+bnd_Sizeof	= 24
+
+BNDB_FORCE	= 0			;bnd_Handler before FileSystem.resource
+BNDB_PRI	= 1			;bnd_Pri is set
 
 _LVOBootScanPartitions	= -30
 _LVOScanPartitions	= -36
@@ -88,10 +113,12 @@ _LVOUnmountPartitions	= -48
 _LVORegisterPartition	= -54
 _LVOMarkAbsent		= -60
 _LVOUnregisterPartition	= -66
+_LVOSetPartitionFs	= -72
 ;
 ; RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
 ;   nameBSTR:a0, devNode:a2, flags:d3, control:d4, nodeDosType:d5) -> d0 = 1/0
-;   Exec-only; may wait for PTR_Lock. Match a published device/unit/startLBA;
+;   Exec-only; may wait for PTR_Lock. Match a published device/unit/startLBA
+;   (in the row's blocks, pe_BlockShift);
 ;   blockCount is currently unused (filesystem and partition sizes may differ).
 ;   Record MOUNTED, devNode, flags and nodeDosType (0 = unknown), and copy name
 ;   and CONTROL into pe_MountName/pe_Control, truncated to 31 characters.
@@ -108,6 +135,14 @@ _LVOUnregisterPartition	= -66
 ;   Clear MOUNTED/INVALID, node/name and recorded mount values; retain scan data.
 ;   A shadow row is freed instead. Does not stop the handler or remove its DOS
 ;   node; use when the handler leaves voluntarily outside a ptable teardown.
+;
+; SetPartitionFs(deviceName:a1, unit:d0, startLBA:d1, devNode:a2, fsName:a0)
+;   -> d0 = 1 set, 0 no match/null node/busy lock
+;   Exec-only, best-effort PTR_Lock, same match as UnregisterPartition. The
+;   registrant records the filesystem it found on its partition, a C string
+;   such as "FAT32" (up to 8 characters kept), in pe_FsName; fsName = 0 when
+;   its volume is gone. RegisterPartition and UnregisterPartition clear it.
+;   Needs a library whose lib_NegSize covers -72.
 ;
 ; MarkAbsent(deviceName:a1, unit:d0) -> d0 = matching entries processed
 ;   Exec-only, best-effort PTR_Lock; return 0 if unavailable. Clear PRESENT and
@@ -146,9 +181,10 @@ PTR_Layout	= 94
 PTR_EntrySize	= 96
 PTR_Sizeof	= 98
 
-PTR_LAYOUT_V	= 5			;bump on every appended field (or newly
+PTR_LAYOUT_V	= 6			;bump on every appended field (or newly
 					;defined pe_Flags bit); v4 = the policy
-					;bits, v5 = PEB_SHADOW extra-mount rows
+					;bits, v5 = PEB_SHADOW extra-mount rows,
+					;v6 = pe_BlockShift, pe_FsName
 
 ;--- PartEntry (one per discovered partition; layout = PTR_LAYOUT_V) -------
 ;
@@ -172,7 +208,9 @@ pe_BlobSize	= 52			;ULONG
 pe_NameB	= 56			;32 bytes embedded BSTR (see naming below)
 pe_Envec	= 88			;84 bytes: TableSize+1 longs (max 21)
 pe_ReadMode	= 172			;UBYTE read command used (PERM_* below)
-;		  173			;(pad)
+pe_BlockShift	= 173			;UBYTE log2 of the bytes per block of
+					;pe_StartLBA/pe_BlockCount (layout 6);
+					;0 = 512, what older publishers wrote
 pe_MountName	= 174			;32 bytes embedded BSTR: real DOS device
 					;name when actually mounted (else empty);
 					;the generated pe_NameB is never overwritten
@@ -187,7 +225,9 @@ pe_NodeDosType	= 248			;ULONG mounted node DosType (layout 3), else 0
 					;resolved per mount or RegisterPartition;
 					;pe_DosType remains detected type for
 					;Flags/CONTROL/UNMOUNT prefix matching
-;		  252..259		;reserved for appended fields (zeroed)
+pe_FsName	= 252			;8 bytes filesystem name from the registrant,
+					;NUL-padded, no NUL when 8 long (layout 6);
+					;empty = unknown
 pe_Sizeof	= 260
 
 ;-- pe_ReadMode values (the device read command, see ptable_boot.s probe)
@@ -219,7 +259,8 @@ PERM_CMD	= 4			;CMD_READ
 PES_MBR		= 0
 PES_GPT		= 1
 PES_RDB		= 2
-PES_FLAT	= 3			;superfloppy: whole-disk FAT volume
+PES_FLAT	= 3			;whole medium, no partition table: $55AA at
+					;block 0, published as DOSTYPE_FAT
 
 ;-- pe_Flags bit numbers (bset/btst)
 PEB_PRESENT	= 0			;entry valid
