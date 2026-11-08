@@ -16,7 +16,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds, STATIC
 
-OPEN = {'F3'}
+OPEN = set()
 
 FAT, MARKER, DOS0, DOS1, DOS3, PFS3 = (0x46415400, 0x464154FF, 0x444F5300, 0x444F5301,
                                        0x444F5303, 0x50465303)
@@ -290,8 +290,67 @@ def c_card_swap(b):
     rows = rig.rows()
     old = [r for r in rows if r['addr'] == first]
     fresh = [r for r in rows if r['addr'] != first]
-    return (len(old) == 1 and old[0]['flags'] & 0x10 and not old[0]['flags'] & 1
-            and len(fresh) == 1 and fresh[0]['count'] == 300 * 32 and fresh[0]['flags'] & 1)
+    swapped = (len(old) == 1 and old[0]['flags'] & 0x10 and not old[0]['flags'] & 1
+               and len(fresh) == 1 and fresh[0]['count'] == 300 * 32 and fresh[0]['flags'] & 1)
+    # A rescan of the new card adds nothing; the first card back takes its
+    # mounted row again and the other row goes.
+    rig.scan()
+    again = [r['addr'] for r in rig.rows()] == [r['addr'] for r in rows]
+    disk.blocks = rdb([('DH0', 2, 101, DOS3)])
+    rig.scan()
+    back = [(r['addr'], r['flags'] & 0x19) for r in rig.rows()] == [(first, 9)]
+    return swapped and again and back and clean(rig)
+
+
+def ffs_floppy():
+    return {0: b'DOS\x01' + bytes(508)}
+
+
+def c_ffs_floppy(b):
+    """An FFS superfloppy mounts on FFS over the whole medium."""
+    rig = Rig(b, md.Disk(ffs_floppy(), total=0x1000))
+    rig.add_fs_entry(DOS1, 0x00280001)
+    rig.scan()
+    n = rig.mount()
+    nodes = [(d['low'], d['high'], d['dostype'], d['seglist']) for d in rig.dos_nodes()]
+    return n == 1 and nodes == [(0, 0xFFF, DOS1, 0x1234)] and clean(rig)
+
+
+def swap(rig, disk, blocks, total):
+    """Card out (MarkAbsent keeps the nodes), another card in."""
+    rig.mark_absent()
+    disk.blocks, disk.total = blocks, total
+    rig.scan()
+    rig.mount()
+    return [(r['dostype'], r['count'], r['flags'] & 0x19) for r in rig.rows()]
+
+
+def c_swap_fat_ffs(b):
+    """A FAT stick's mounted row is not turned into the FFS superfloppy's row
+    under the FAT node; the superfloppy gets a row and an FFS node."""
+    disk = md.Disk({0: im.fat_boot(total=0x2000)}, total=0x2000)
+    rig = Rig(b, disk)
+    with_fat_handler(rig)
+    rig.add_fs_entry(DOS1, 0x00280001)
+    rig.scan()
+    rig.mount()
+    rows = swap(rig, disk, ffs_floppy(), 0x1000)
+    dts = sorted(d['dostype'] for d in rig.dos_nodes())
+    back = swap(rig, disk, {0: im.fat_boot(total=0x2000)}, 0x2000)
+    return (rows == [(FAT, 0x2000, 0x18), (DOS1, 0x1000, 9)] and dts == sorted([MARKER, DOS1])
+            and back == [(FAT, 0x2000, 9), (DOS1, 0x1000, 0x18)])
+
+
+def c_swap_ffs_size(b):
+    """A mounted FFS superfloppy row is not resized under its fixed window."""
+    disk = md.Disk(ffs_floppy(), total=0x1000)
+    rig = Rig(b, disk)
+    rig.add_fs_entry(DOS1, 0x00280001)
+    rig.scan()
+    rig.mount()
+    rows = swap(rig, disk, ffs_floppy(), 0x2000)
+    windows = sorted(d['high'] for d in rig.dos_nodes())
+    return rows == [(DOS1, 0x1000, 0x18), (DOS1, 0x2000, 9)] and windows == [0xFFF, 0x1FFF]
 
 
 # -- binding rows ----------------------------------------------------------------
@@ -429,6 +488,9 @@ CASES = [
     (None, 'same-named fat node reused', c_reuse_fat),
     ('F1', 'same-named other fs not reused', c_reuse_fat_only),
     ('F3', 'card swap with a changed rdb', c_card_swap),
+    (None, 'ffs superfloppy mounts on ffs', c_ffs_floppy),
+    ('F3', 'swap fat stick to ffs superfloppy', c_swap_fat_ffs),
+    ('F3', 'swap to a larger ffs superfloppy', c_swap_ffs_size),
     (None, 'mountcfg of 28 bytes: no rows', c_bind_old_size),
     ('D', 'rdb partition bound by path', c_bind_rdb_path),
     ('D', 'rdb row keeps its dostype', c_bind_rdb_no_dostype),

@@ -295,8 +295,7 @@ _spr_cut:
 _spr_key:
 
 ;-- same slot already present (rescan / card swap)?  refresh it in place
-	move.l	d6,d0
-	bsr	_scanFindSlot
+	bsr	_scanFindRDB
 	tst.l	d0
 	bne.w	_spr_upd
 
@@ -403,6 +402,8 @@ _scanPubRec:
 ;-- same slot already present (rescan / card swap)?  refresh it in place
 	moveq.l	#0,d0
 	move.b	PR_PartIndex(a2),d0	;identity = partition index (CF<index>)
+	move.l	PR_DosType(a2),d2
+	move.l	PR_BlockCount(a2),d3
 	bsr	_scanFindByIndex
 	tst.l	d0
 	bne.s	_spc_upd
@@ -962,76 +963,143 @@ _spg_out:
 	rts
 
 ;===========================================================
-; _scanFindByIndex / _scanFindSlot: find the entry for this slot,
-; matched by device + unit + ONE identity field:
-;   _scanFindByIndex: pe_PartIndex - the synthesized schemes
-;     (MBR/GPT/FLAT) name a slot by its index (CF<index>), so the
-;     same slot is reused across card swaps regardless of where the
-;     partition starts or how big it is.
-;   _scanFindSlot: pe_StartLBA - RDB carries real names; a card has
-;     exactly one partition starting at a given LBA (the FS size may
-;     differ from the partition size, so blockCount is NOT part of
-;     the identity - same rule RegisterPartition uses).
-; The publisher updates a found entry in place (refreshing geometry,
-; preserving the mount overlay) instead of publishing a duplicate;
-; this is the single rule that prevents double entries across card
-; swaps for every scheme.
-; In : d0 = partIndex / StartLBA, a4 = &BootCtx, a5 = ExecBase
-; Out: d0 = matching PartEntry, or 0 if none; clobbers d1
+; _scanFindRDB: the RDB entry to refresh for the PART block at a2.
+; Matched by device + unit + pe_StartLBA: a card has one partition
+; starting at a given block. Among those, the entry whose envec window
+; and DosType equal the block's is taken; else an unmounted one, which
+; is refreshed in place. A mounted entry with another window is never
+; refreshed: its node keeps the old geometry, so the entry is left to the
+; purge (MOUNTED + INVALID) and the partition gets a new entry.
+; In : a2 = PART block, d6 = start block, a4 = &BootCtx, a5 = ExecBase
+; Out: d0 = entry, or 0 for a new one; clobbers d1
 ;===========================================================
-_scanFindByIndex:
-	moveq.l	#pe_PartIndex,d1
-	bra.s	_scanFindBy
-_scanFindSlot:
-	moveq.l	#pe_StartLBA,d1
-_scanFindBy:
-	movem.l	d2-d5/a2-a3,-(sp)
-	move.l	d1,d2			;d2 = identity field offset
-	move.l	d0,d4			;d4 = identity value
-	move.l	BC_Unit(a4),d3
-;-- the identity includes the scheme class: an RDB entry may only be
-;   refreshed by the RDB publisher (StartLBA identity) and a table entry only
-;   by the MBR/GPT/flat publishers (PartIndex identity), or a card swap that
-;   changes the scheme would rewrite a mounted entry of the other kind in
-;   place instead of leaving it to purge (kept as MOUNTED+INVALID)
-	moveq.l	#1,d5			;d5 = 1: caller wants a PES_RDB entry
-	cmp.l	#pe_StartLBA,d2
-	beq.s	_sfb_res
-	moveq.l	#0,d5			;0: caller wants a non-RDB entry
-_sfb_res:
+_scanFindRDB:
+	movem.l	d2-d3/a0-a1/a3,-(sp)
+	moveq.l	#0,d3			;d3 = unmounted entry to fall back on
+	move.l	BC_Unit(a4),d2
 	bsr	_partGetResource
 	tst.l	d0
-	beq.s	_sfb_no
+	beq.s	_sfr_out
+	move.l	d0,a3
+	move.l	PTR_PartList(a3),a3
+_sfr_walk:
+	tst.l	(a3)
+	beq.s	_sfr_end
+	cmp.l	pe_Unit(a3),d2
+	bne.s	_sfr_next
+	cmp.l	pe_StartLBA(a3),d6
+	bne.s	_sfr_next
+	cmp.b	#PES_RDB,pe_Source(a3)
+	bne.s	_sfr_next
+	move.l	pe_Device(a3),a0
+	move.l	BC_DevName(a4),a1
+	bsr	_psStrEq
+	tst.l	d0
+	beq.s	_sfr_next
+	lea	pe_Envec(a3),a0
+	lea	pb_Environment(a2),a1
+	moveq.l	#DE_SizeBlock*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_Surfaces*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_BlocksPerTrk*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_LowCyl*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_HighCyl*4,d0
+	bsr.s	_sfr_cmp
+	moveq.l	#DE_DOSTYPE*4,d0
+	bsr.s	_sfr_cmp
+	move.l	a3,d0			;same partition: refresh this one
+	bra.s	_sfr_out
+_sfr_differs:
+	addq.l	#4,sp			;drop the _sfr_cmp return address
+	btst	#PEB_MOUNTED,pe_Flags(a3)
+	bne.s	_sfr_next		;its node has the old geometry
+	tst.l	d3
+	bne.s	_sfr_next
+	move.l	a3,d3
+_sfr_next:
+	move.l	(a3),a3
+	bra.s	_sfr_walk
+_sfr_end:
+	move.l	d3,d0
+_sfr_out:
+	movem.l	(sp)+,d2-d3/a0-a1/a3
+	rts
+;-- _sfr_cmp: envec long at offset d0 equal in a0 and a1, else leave
+;   through _sfr_differs
+_sfr_cmp:
+	move.l	(a0,d0.w),d1
+	cmp.l	(a1,d0.w),d1
+	bne.s	_sfr_differs
+	rts
+
+;===========================================================
+; _scanFindByIndex: find the entry for this slot, matched by device +
+; unit + pe_PartIndex: the synthesized schemes (MBR/GPT/FLAT) name a
+; slot by its index (CF<index>), so the same slot is reused across card
+; swaps regardless of where the partition starts or how big it is. The
+; publisher updates a found entry in place (refreshing geometry,
+; preserving the mount overlay) instead of publishing a duplicate.
+; A mounted entry is reused only when its node fits the new partition:
+; the same DosType, and for a DosType other than FAT (a fixed window) the
+; same size. Else an unmounted entry is taken, or none; the mounted one is
+; left to the purge (MOUNTED + INVALID).
+; In : d0 = partIndex, d2 = DosType, d3 = size in blocks, a4, a5
+; Out: d0 = matching PartEntry, or 0 if none; clobbers d1/a0/a1
+;===========================================================
+_scanFindByIndex:
+	movem.l	d2-d6/a2-a3,-(sp)
+	move.l	d0,d4			;d4 = partition index
+	moveq.l	#0,d6			;d6 = unmounted entry to fall back on
+	move.l	BC_Unit(a4),d5
+	bsr	_partGetResource
+	tst.l	d0
+	beq.s	_sfb_end
 	move.l	d0,a2
 	lea	PTR_PartList(a2),a2
 	move.l	(a2),a3
 _sfb_walk:
 	move.l	(a3),d0
-	beq.s	_sfb_no
-	cmp.l	pe_Unit(a3),d3
+	beq.s	_sfb_end
+	cmp.l	pe_Unit(a3),d5
 	bne.s	_sfb_next
-	cmp.l	(a3,d2.w),d4
+	cmp.l	pe_PartIndex(a3),d4
 	bne.s	_sfb_next
-	moveq.l	#0,d0
+;-- an RDB entry is refreshed only by the RDB publisher, or a card swap that
+;   changes the scheme would rewrite a mounted entry of the other kind in
+;   place instead of leaving it to the purge (kept as MOUNTED+INVALID)
 	cmp.b	#PES_RDB,pe_Source(a3)
-	bne.s	_sfb_src
-	moveq.l	#1,d0
-_sfb_src:
-	cmp.b	d0,d5			;scheme class must match the caller's
-	bne.s	_sfb_next
+	beq.s	_sfb_next
 	move.l	pe_Device(a3),a0
 	move.l	BC_DevName(a4),a1
 	bsr	_psStrEq
 	tst.l	d0
-	bne.s	_sfb_yes
+	beq.s	_sfb_next
+	btst	#PEB_MOUNTED,pe_Flags(a3)
+	bne.s	_sfb_mounted
+	tst.l	d6
+	bne.s	_sfb_next
+	move.l	a3,d6
+	bra.s	_sfb_next
+_sfb_mounted:
+	cmp.l	pe_DosType(a3),d2
+	bne.s	_sfb_next		;its node serves another filesystem
+	move.l	d2,d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_sfb_yes		;auto-detect node: follows the card
+	cmp.l	pe_BlockCount(a3),d3
+	beq.s	_sfb_yes		;same window
 _sfb_next:
 	move.l	(a3),a3
 	bra.s	_sfb_walk
 _sfb_yes:
 	move.l	a3,d0			;return the matching entry
-	movem.l	(sp)+,d2-d5/a2-a3
+	movem.l	(sp)+,d2-d6/a2-a3
 	rts
-_sfb_no:
-	moveq.l	#0,d0
-	movem.l	(sp)+,d2-d5/a2-a3
+_sfb_end:
+	move.l	d6,d0
+	movem.l	(sp)+,d2-d6/a2-a3
 	rts
