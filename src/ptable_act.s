@@ -318,8 +318,11 @@ _arc_done:
 	move.l	mc_NodeHandler(a0),d1	;path (0 = FileSystem.resource only)
 	move.l	mc_NodeDosType(a0),d3
 	beq.s	_arc_nstore		;no DosType named -> envec stays as scanned
-	tst.l	pe_BlockCount(a3)
+	move.l	pe_BlockCount(a3),d4
 	beq.s	_arc_nstore		;size unknown: no fixed window possible
+	subq.l	#1,d4
+	add.l	pe_StartLBA(a3),d4
+	bcs.s	_arc_nstore		;last block past 32 bits: no window either
 	move.l	d3,d0
 _arc_nstore:
 	move.l	d0,pe_NodeDosType(a3)

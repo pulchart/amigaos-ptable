@@ -253,21 +253,35 @@ _scanPubRDB:
 
 ;-- geometry summary first (it is also the duplicate key):
 ;   cylblocks = Surfaces * BlocksPerTrack;
-;   start = LowCyl * cylblocks; count = (HighCyl-LowCyl+1) * cylblocks
+;   start = LowCyl * cylblocks; count = (HighCyl-LowCyl+1) * cylblocks.
+;   A start past 32 bits cannot serve as the key: not published. A count
+;   reaching past 32 bits is cut at the last 32-bit block.
 	move.l	pb_Environment+DE_Surfaces*4(a2),d0
 	move.l	pb_Environment+DE_BlocksPerTrk*4(a2),d1
 	UMUL32
+	bvs.w	_spr_skip
 	move.l	d0,d4			;d4 = cylblocks
 	move.l	pb_Environment+DE_LowCyl*4(a2),d0
 	move.l	d4,d1
 	UMUL32
+	bvs.w	_spr_skip
 	move.l	d0,d6			;d6 = start
 	move.l	pb_Environment+DE_HighCyl*4(a2),d0
 	sub.l	pb_Environment+DE_LowCyl*4(a2),d0
+	bcs.w	_spr_skip		;HighCyl below LowCyl
 	addq.l	#1,d0
+	beq.s	_spr_cut
 	move.l	d4,d1
 	UMUL32
+	bvs.s	_spr_cut
 	move.l	d0,d4			;d4 = block count
+	subq.l	#1,d0
+	add.l	d6,d0
+	bcc.s	_spr_key		;last block fits 32 bits
+_spr_cut:
+	move.l	d6,d4
+	not.l	d4			;last block $FFFFFFFE
+_spr_key:
 
 ;-- same slot already present (rescan / card swap)?  refresh it in place
 	move.l	d6,d0

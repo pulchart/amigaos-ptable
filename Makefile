@@ -215,7 +215,7 @@ check-lha:
 # Each script sweeps both CPU tiers and both flavours itself.
 
 TEST_CHECKS = audit_cold_registration.py audit_hunk_bounds.py parts_walker.py \
-              scan_device.py act_binding.py unlink_paths.py unlink_free_entry.py
+              scan_device.py act_binding.py umul32.py unlink_paths.py unlink_free_entry.py
 
 # Gated on the dependency report: two providers of the amitools and machine68k
 # imports overwrite each other, and a suite that runs anyway passes or fails by
