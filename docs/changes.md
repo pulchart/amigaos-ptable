@@ -1,11 +1,20 @@
-## 20261007
+## 20261108-dev
 
 <!-- COMPONENTS:BEGIN -->
 _Components in this release_:
 
+- `ptable.library 2.3-dev (08.11.2026)` _(new)_
+- `lsptres 1.2 (03.10.2026)`
+<!-- COMPONENTS:END -->
+
+TBD
+
+## 20261007
+
+_Components in this release_:
+
 - `ptable.library 2.2 (03.10.2026)` _(new)_
 - `lsptres 1.2 (03.10.2026)` _(new)_
-<!-- COMPONENTS:END -->
 
 #### Install
 - New Installer script.

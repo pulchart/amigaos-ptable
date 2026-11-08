@@ -5,7 +5,7 @@ Type:         util/libs
 Version:      @VERSION@
 Requires:     AmigaOS 2.0+
 Architecture: m68k-amigaos
-Replaces:     util/libs/ptable.v20260930.lha
+Replaces:     util/libs/ptable.v20261007.lha
 Kurz:         Partitionstabellen-Library
 
 ptable.library is the AmigaOS partition-table library (one place that parses
@@ -28,29 +28,7 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-Install:
-
-* New Installer script.
-* Reworked icon positions.
-
-ptable.library 2.2:
-
-* Fixed SCSI reads for partition detection.
-* Serial debug output ends lines with LF alone.
-
-Tools 'lsptres 1.2':
-
-* Improved paging.
-* Output lines end in LF alone.
-
-WHAT IT DOES
-============
-* Cold-boot RDB autoboot: boot directly from an RDB-partitioned card
-  (requires the library ROM-resident).
-* DOS-time scanning and automount: discover and mount hotplugged
-  RDB/MBR/GPT/flat cards, via the consuming driver.
-* Publishes a shared partition.resource that any driver or handler can read
-  instead of parsing the partition table itself.
+TBD
 
 REQUIREMENTS
 ============
