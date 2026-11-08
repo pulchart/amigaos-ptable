@@ -292,14 +292,14 @@ def run_suite(cpu, flavour):
         boot = present | (1 << eq['PRFB_BOOTABLE'])
 
         # --- MBR ------------------------------------------------------
-        for kind in (0x01, 0x04, 0x06, 0x0b, 0x0c, 0x0e):
+        for kind in (0x01, 0x04, 0x06, 0x0b, 0x0c, 0x0e, 0x07):
             w = Walker(image, eq)
             n = w.run('_partScanMBR', a0=w.mem.w_block(BLOCK, mbr([(0, kind, 100, 8)])) or BLOCK)
             check('mbr type %02x accepted' % kind, (n, w.records(n)),
                   (1, [{'start': 100, 'blocks': 8, 'dostype': eq['DOSTYPE_FAT'],
                         'index': 0, 'flags': present}]))
             w.close()
-        for kind in (0x00, 0x05, 0x07, 0x82, 0xee):
+        for kind in (0x00, 0x05, 0x82, 0xee):
             w = Walker(image, eq)
             w.mem.w_block(BLOCK, mbr([(0, kind, 100, 8)]))
             check('mbr type %02x refused' % kind, w.run('_partScanMBR', a0=BLOCK), 0)
@@ -344,7 +344,7 @@ def run_suite(cpu, flavour):
                      [(100, 8, 0), (1010, 20, 4), (1110, 30, 5)], [1000, 1100])
         logicals('non-FAT logical skipped but indexed',
                  {0: mbr([(0, 0x0f, 1000, 500)]),
-                  1000: ebr((0, 0x07, 10, 20), (0, 0x05, 100, 50)),
+                  1000: ebr((0, 0x83, 10, 20), (0, 0x05, 100, 50)),
                   1100: ebr((0, 0x0c, 10, 30))},
                  [(1110, 30, 5)])
         logicals('empty EBR entry takes no index',
