@@ -28,7 +28,9 @@ Make exports its assembler as `PTABLE_VASM`; direct runs resolve `PTABLE_VASM`, 
 
 ## Not covered
 
-AmigaOS itself, hardware timing, interrupts, reentrancy, arbitrary device faults.
+AmigaOS itself, hardware timing, interrupts, reentrancy.
+
+`scan_device.py` runs the real ScanPartitions LVO on a mocked Exec (`mockexec.py`) against a mock device (`mockdev.py`: command set, block size, injected errors) and images built by `images.py`. Its `OPEN` set lists the cases whose fix has not landed; they must still fail, and the fixing commit removes their id.
 
 ## Writing a test
 
