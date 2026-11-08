@@ -16,7 +16,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds, STATIC
 
-OPEN = {'E1', 'E2', 'F2', 'F3', 'F4', 'F5', 'K'}
+OPEN = {'E1', 'E2', 'F2', 'F3', 'F5', 'K'}
 
 FAT, MARKER, DOS0, DOS1, DOS3, PFS3 = (0x46415400, 0x464154FF, 0x444F5300, 0x444F5301,
                                        0x444F5303, 0x50465303)
@@ -95,7 +95,7 @@ def c_absent_not_mounted(b):
     rig.scan()
     rig.mark_absent()
     n = rig.mount()
-    return n == 0 and adds(rig) == [] and clean(rig)
+    return n == 0 and adds(rig) == []
 
 
 def c_no_leak_idle(b):

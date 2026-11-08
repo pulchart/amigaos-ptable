@@ -21,7 +21,7 @@
 ;   Exec-only. Scan and publish; never mount. May wait for PTR_Lock/device I/O.
 ;
 ; MountPartitions(deviceName:a1, unit:d0, cfg:a0) -> d0 = mounted count
-;   Process only. Start eligible unmounted entries via AddDosNode(ADNF_STARTPROC).
+;   Process only. Start present, unmounted entries via AddDosNode(ADNF_STARTPROC).
 ;   cfg = MountCfg or 0 for defaults. Resolve Flags/CONTROL by pe_DosType;
 ;   record results in pe_MountFlags/pe_Control and the node's fssm_Flags/de_Control.
 ;   mc_NodeDosType/mc_NodeHandler select the handler for synthesized FAT entries;
