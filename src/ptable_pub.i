@@ -63,7 +63,10 @@ mc_UnmFlags	= 24			;ULONG MCUF_* bits; read only if mc_Size >= 28
 					;mount pass stamps entry policy, including
 					;already-mounted entries; older cfg leaves it
 					;unchanged
-mc_Sizeof	= 28
+mc_Binds	= 28			;APTR  binding rows (0 = none); the three
+mc_BindCount	= 32			;ULONG fields are read only if mc_Size >= 40
+mc_BindSize	= 36			;ULONG bytes per row, >= bnd_Sizeof
+mc_Sizeof	= 40
 
 MCUF_KEEPSTATIC	= 0			;keep static mounts on card removal
 					;(-> PEB_KEEPSTATIC)
@@ -82,6 +85,26 @@ ovr_Sizeof	= 16
 ;
 ; ovr_Sizeof is fixed across versions: changing it breaks table traversal.
 ; Append new settings to MountCfg, gated by mc_Size.
+;
+; Binding row: how an entry's node gets its handler. The first row whose
+; prefix and source mask match the entry applies; with none, mc_NodeDosType/
+; mc_NodeHandler apply to MBR/GPT/flat FAT entries. Rows step by mc_BindSize,
+; so a newer caller may append fields.
+bnd_Prefix	= 0			;ULONG dostype high 3 bytes; 0 = any
+bnd_Sources	= 4			;UBYTE 1<<PES_* mask; 0 = any
+bnd_Flags	= 5			;UBYTE BNDB_* bits
+;		  6..7			;(pad)
+bnd_DosType	= 8			;ULONG node DosType, fixed window; 0 = keep;
+					;never applied to RDB entries
+bnd_Handler	= 12			;APTR  handler path C-string; 0 = none.
+					;Used when no FileSysEntry matches, or first
+					;with BNDB_FORCE
+bnd_Stack	= 16			;ULONG minimum dn_StackSize; 0 = keep
+bnd_Pri		= 20			;LONG  dn_Priority, with BNDB_PRI
+bnd_Sizeof	= 24
+
+BNDB_FORCE	= 0			;bnd_Handler before FileSystem.resource
+BNDB_PRI	= 1			;bnd_Pri is set
 
 _LVOBootScanPartitions	= -30
 _LVOScanPartitions	= -36

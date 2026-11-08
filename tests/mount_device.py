@@ -3,8 +3,8 @@
 
 The real ScanPartitions, MountPartitions and MarkAbsent LVOs run on a mocked
 Exec with a mocked expansion.library (AddDosNode), the DOS device list and
-FileSystem.resource. Case ids: E RDB filesystems, F node adoption and static
-mounts, K caller strings. OPEN lists the ids whose fix has not landed: their
+FileSystem.resource. Case ids: D handler binding rows, E RDB filesystems,
+F node adoption and static mounts, K caller strings. OPEN lists the ids whose fix has not landed: their
 check must still fail, and the fixing commit removes the id here.
 
 Status: gated, run by make test.
@@ -20,6 +20,8 @@ OPEN = {'F3'}
 
 FAT, MARKER, DOS0, DOS1, DOS3, PFS3 = (0x46415400, 0x464154FF, 0x444F5300, 0x444F5301,
                                        0x444F5303, 0x50465303)
+SFS0, MSD0 = 0x53465300, 0x4D534400
+PES_MBR, PES_RDB = 0, 2
 CFG = STATIC + 0x8000
 
 
@@ -51,6 +53,35 @@ def cfg(rig, handler=None, node_dostype=0):
     rig.mem.w32(CFG + eq['mc_NodeDosType'], node_dostype)
     rig.mem.w32(CFG + eq['mc_Size'], eq['mc_UnmFlags'] + 4)
     return CFG
+
+
+def binds(rig, rows, size=None, handler=None):
+    """A MountCfg with binding rows: dicts of prefix, sources, force, pri,
+    dostype, handler, stack."""
+    eq = rig.eq
+    assert 'mc_Binds' in eq, 'no binding table in this build'
+    base = cfg(rig, handler=handler)
+    rig.mem.w_block(base + eq['mc_UnmFlags'] + 4, bytes(eq['mc_BindSize'] - eq['mc_UnmFlags']))
+    size_row = eq['bnd_Sizeof']
+    table = rig.alloc_static(size_row * len(rows))
+    for i, r in enumerate(rows):
+        a = table + i * size_row
+        rig.mem.w_block(a, bytes(size_row))
+        rig.mem.w32(a + eq['bnd_Prefix'], r.get('prefix', 0))
+        rig.mem.w8(a + eq['bnd_Sources'], r.get('sources', 0))
+        flags = ((1 << eq['BNDB_FORCE']) if r.get('force') else 0) | \
+                ((1 << eq['BNDB_PRI']) if 'pri' in r else 0)
+        rig.mem.w8(a + eq['bnd_Flags'], flags)
+        rig.mem.w32(a + eq['bnd_DosType'], r.get('dostype', 0))
+        if r.get('handler'):
+            rig.mem.w32(a + eq['bnd_Handler'], rig.bstr(r['handler']) + 1)
+        rig.mem.w32(a + eq['bnd_Stack'], r.get('stack', 0))
+        rig.mem.w32(a + eq['bnd_Pri'], r.get('pri', 0) & 0xFFFFFFFF)
+    rig.mem.w32(base + eq['mc_Binds'], table)
+    rig.mem.w32(base + eq['mc_BindCount'], len(rows))
+    rig.mem.w32(base + eq['mc_BindSize'], size_row)
+    rig.mem.w32(base + eq['mc_Size'], size or eq['mc_BindSize'] + 4)
+    return base
 
 
 def rdb(parts, **kw):
@@ -246,6 +277,124 @@ def c_card_swap(b):
             and len(fresh) == 1 and fresh[0]['count'] == 300 * 32 and fresh[0]['flags'] & 1)
 
 
+# -- binding rows ----------------------------------------------------------------
+FAT_MBR = [(0, 0x0C, 2048, 0x8000)]
+
+
+def node(rig):
+    nodes = rig.dos_nodes()
+    assert len(nodes) == 1, nodes
+    return nodes[0]
+
+
+def c_bind_rdb_path(b):
+    """D: an RDB partition without a FileSysEntry mounts by a row's path."""
+    rig = rig_for(b, rdb([('DH0', 2, 101, SFS0)]))
+    rig.scan()
+    n = rig.mount(binds(rig, [dict(prefix=SFS0, handler='L:SmartFilesystem')]))
+    d = node(rig)
+    return (n == 1 and (d['handler'], d['seglist'], d['low'], d['high'], d['dostype'])
+            == ('L:SmartFilesystem', 0, 2, 101, SFS0) and clean(rig))
+
+
+def c_bind_rdb_no_dostype(b):
+    """D: a row's DosType and window never apply to an RDB partition."""
+    rig = rig_for(b, rdb([('DH0', 2, 101, SFS0)]))
+    rig.scan()
+    rig.mount(binds(rig, [dict(prefix=SFS0, handler='L:SFS', dostype=MSD0)]))
+    d = node(rig)
+    return (d['low'], d['high'], d['dostype']) == (2, 101, SFS0)
+
+
+def c_bind_force(b):
+    """D: FORCE takes the row's path over a FileSysEntry."""
+    rig = rig_for(b, im.mbr_disk(FAT_MBR))
+    with_fat_handler(rig)
+    rig.scan()
+    rig.mount(binds(rig, [dict(prefix=FAT, handler='L:fat95', force=True)]))
+    d = node(rig)
+    return (d['handler'], d['seglist']) == ('L:fat95', 0) and clean(rig)
+
+
+def c_bind_noforce(b):
+    """D: without FORCE a FileSysEntry wins over the row's path."""
+    rig = rig_for(b, im.mbr_disk(FAT_MBR))
+    with_fat_handler(rig)
+    rig.scan()
+    rig.mount(binds(rig, [dict(prefix=FAT, handler='L:fat95')]))
+    d = node(rig)
+    return (d['handler'], d['seglist']) == (None, 0x1234)
+
+
+def c_bind_stack_pri(b):
+    """D: the row's stack is a floor over the patched node, its priority is set."""
+    rig = rig_for(b, im.mbr_disk(FAT_MBR + [(0, 0x0C, 0x9000, 0x4000)]))
+    with_fat_handler(rig)
+    rig.scan()
+    rig.mount(binds(rig, [dict(prefix=FAT, stack=16384, pri=-3)]))
+    big = [(d['stack'], d['pri']) for d in rig.dos_nodes()]
+    rig2 = rig_for(b, im.mbr_disk(FAT_MBR))
+    with_fat_handler(rig2)
+    rig2.scan()
+    rig2.mount(binds(rig2, [dict(prefix=FAT, stack=2000)]))
+    small = node(rig2)
+    return big == [(16384, 0xFFFFFFFD)] * 2 and (small['stack'], small['pri']) == (4000, 5)
+
+
+def c_bind_sources(b):
+    """D: a source mask limits the row to those tables; prefix 0 matches any."""
+    rig = rig_for(b, rdb([('DH0', 2, 101, SFS0)]))
+    rig.scan()
+    n = rig.mount(binds(rig, [dict(sources=1 << PES_MBR, handler='L:x')]))
+    other = n == 0 and mounted(rig) == [('DH0', False)]
+    rig2 = rig_for(b, rdb([('DH0', 2, 101, SFS0)]))
+    rig2.scan()
+    n2 = rig2.mount(binds(rig2, [dict(sources=1 << PES_RDB, handler='L:y')]))
+    return other and n2 == 1 and node(rig2)['handler'] == 'L:y'
+
+
+def c_bind_first(b):
+    """D: the first matching row wins."""
+    rig = rig_for(b, im.mbr_disk(FAT_MBR))
+    rig.scan()
+    rig.mount(binds(rig, [dict(prefix=SFS0, handler='L:s'), dict(prefix=FAT, handler='L:a'),
+                          dict(prefix=FAT, handler='L:b')]))
+    return node(rig)['handler'] == 'L:a'
+
+
+def c_bind_implicit(b):
+    """D: with no matching row, mc_NodeHandler still serves a FAT partition."""
+    rig = rig_for(b, im.mbr_disk(FAT_MBR))
+    rig.scan()
+    rig.mount(binds(rig, [dict(prefix=SFS0, handler='L:s')], handler='L:fallback'))
+    return node(rig)['handler'] == 'L:fallback'
+
+
+def c_bind_dostype(b):
+    """D: a row's DosType on an MBR partition gives a fixed window."""
+    rig = rig_for(b, im.mbr_disk(FAT_MBR))
+    rig.scan()
+    rig.mount(binds(rig, [dict(prefix=FAT, dostype=MSD0, handler='L:CrossDOSFileSystem')]))
+    d = node(rig)
+    return ((d['dostype'], d['low'], d['high'], d['handler'])
+            == (MSD0, 2048, 2048 + 0x8000 - 1, 'L:CrossDOSFileSystem') and clean(rig))
+
+
+def c_bind_old_size(b):
+    """A MountCfg of 28 bytes has no binding table."""
+    rig = rig_for(b, im.mbr_disk(FAT_MBR))
+    with_fat_handler(rig)
+    rig.scan()
+    base = cfg(rig)
+    rig.mem.w_block(base + 28, struct.pack('>III', STATIC + 0x9000, 1, 24))
+    rig.mem.w32(STATIC + 0x9000, FAT)
+    rig.mem.w32(STATIC + 0x9000 + 12, rig.bstr('L:x') + 1)
+    rig.mem.w8(STATIC + 0x9000 + 5, 1)
+    rig.mount(base)
+    d = node(rig)
+    return (d['handler'], d['seglist']) == (None, 0x1234)
+
+
 CASES = [
     (None, 'mount mbr', c_mount_mbr), (None, 'mount rdb', c_mount_rdb),
     (None, 'second pass builds nothing', c_remount_same),
@@ -262,6 +411,16 @@ CASES = [
     (None, 'same-named fat node reused', c_reuse_fat),
     ('F1', 'same-named other fs not reused', c_reuse_fat_only),
     ('F3', 'card swap with a changed rdb', c_card_swap),
+    (None, 'mountcfg of 28 bytes: no rows', c_bind_old_size),
+    ('D', 'rdb partition bound by path', c_bind_rdb_path),
+    ('D', 'rdb row keeps its dostype', c_bind_rdb_no_dostype),
+    ('D', 'force: path over filesysentry', c_bind_force),
+    (None, 'no force: filesysentry wins', c_bind_noforce),
+    ('D', 'stack floor and priority', c_bind_stack_pri),
+    ('D', 'source mask', c_bind_sources),
+    ('D', 'first matching row wins', c_bind_first),
+    (None, 'no row: mc_NodeHandler', c_bind_implicit),
+    ('D', 'row dostype: fixed window', c_bind_dostype),
 ]
 
 

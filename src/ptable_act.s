@@ -166,6 +166,14 @@ _abb_noctrl:
 ;   partition. Other filesystems must match exactly.
 ;   Matching is on the NODE dostype, not the detected one: a node the caller
 ;   asked to be another filesystem must not fall through the FAT family.
+	move.l	BC_Bind(a4),d0		;FORCE row with a path: the path first
+	beq.s	_abb_fsr
+	move.l	d0,a0
+	btst	#BNDB_FORCE,bnd_Flags(a0)
+	beq.s	_abb_fsr
+	tst.l	BC_NodeHandler(a4)
+	bne.s	_abb_path
+_abb_fsr:
 	move.l	a5,a6			;ExecBase for _bootFindFSEntry
 	move.l	pe_NodeDosType(a3),d0
 	bsr	_bootFindFSEntry
@@ -211,9 +219,7 @@ _abb_hlen:
 	move.l	a1,d0
 	lsr.l	#2,d0
 	move.l	d0,16(a2)		;dn_Handler = BPTR (dn_SegList left 0)
-	move.l	a2,d0
-	movem.l	(sp)+,d2-d3/a2/a6
-	rts
+	bra.s	_abb_plain
 _abb_nofs:
 ;-- no handler for this dostype: free the blob and fail so the caller leaves
 ;   the entry present-only (P---) instead of marking a handler-less node MOUNTED
@@ -229,6 +235,19 @@ _abb_fse:
 	move.l	a2,a0
 	bsr	_bootPatchDNfromFSE
 _abb_plain:
+;-- binding row: stack as a floor over the default or patched value, priority
+	move.l	BC_Bind(a4),d0
+	beq.s	_abb_ok
+	move.l	d0,a0
+	move.l	bnd_Stack(a0),d0
+	cmp.l	20(a2),d0
+	bls.s	_abb_pri
+	move.l	d0,20(a2)		;dn_StackSize
+_abb_pri:
+	btst	#BNDB_PRI,bnd_Flags(a0)
+	beq.s	_abb_ok
+	move.l	bnd_Pri(a0),24(a2)	;dn_Priority
+_abb_ok:
 	move.l	a2,d0
 	movem.l	(sp)+,d2-d3/a2/a6
 	rts
@@ -298,30 +317,38 @@ _arc_empty:
 	clr.b	(a1)			;empty control
 _arc_done:
 
-;-- node DosType + handler path. Default is the DosType the scan already put in
-;   the envec and no path, so a caller that configures nothing changes nothing.
-;   Both settings apply ONLY to an entry whose envec this library synthesized
-;   and which we detected as FAT:
-;     - not PES_RDB, because an RDB envec is the card's own, its LowCyl/HighCyl
-;       are real cylinders against real Surfaces/BlocksPerTrk, and pe_StartLBA /
-;       pe_BlockCount are blocks. Writing one into the other would be nonsense.
-;     - FAT family, because that is the scope this knob is defined for; another
-;       filesystem's node must not be handed a FAT handler's path.
+;-- node DosType, handler path and binding row. Default is the DosType the
+;   scan already put in the envec and no path, so a caller that configures
+;   nothing changes nothing. The first matching binding row decides; with
+;   none, mc_NodeDosType/mc_NodeHandler apply to FAT entries.
+;   A DosType never applies to PES_RDB: an RDB envec is the card's own, its
+;   LowCyl/HighCyl are real cylinders, and pe_StartLBA/pe_BlockCount are
+;   blocks. A path applies to any source.
 	move.l	pe_Envec+DE_DOSTYPE*4(a3),d0
 	moveq.l	#0,d1
+	clr.l	BC_Bind(a4)
 	move.l	BC_MountCfg(a4),d2
 	beq.s	_arc_nstore		;cold / no cfg
+	bsr	_actFindBind		;a0 = row, 0 = none
+	move.l	a0,BC_Bind(a4)
+	beq.s	_arc_implicit
+	move.l	bnd_Handler(a0),d1
+	move.l	bnd_DosType(a0),d3
+	bra.s	_arc_dt
+_arc_implicit:
 	cmp.b	#PES_RDB,pe_Source(a3)
-	beq.s	_arc_nstore
-	move.l	d0,d3
-	bsr	_actPrefix
-	exg	d0,d3			;d0 = envec DosType, d3 = prefix
+	beq.s	_arc_nstore		;mc_Node* are for synthesized envecs only
+	move.l	pe_DosType(a3),d3
+	clr.b	d3			;d3 = prefix
 	cmp.l	#DOSTYPE_FAT,d3
 	bne.s	_arc_nstore
 	move.l	d2,a0
 	move.l	mc_NodeHandler(a0),d1	;path (0 = FileSystem.resource only)
 	move.l	mc_NodeDosType(a0),d3
+_arc_dt:
 	beq.s	_arc_nstore		;no DosType named -> envec stays as scanned
+	cmp.b	#PES_RDB,pe_Source(a3)
+	beq.s	_arc_nstore
 	move.l	pe_BlockCount(a3),d4
 	beq.s	_arc_nstore		;size unknown: no fixed window possible
 	subq.l	#1,d4
@@ -525,6 +552,47 @@ _afr_yes:
 _afr_no:
 	moveq.l	#0,d0
 _afr_out:
+	rts
+
+;===========================================================
+; _actFindBind: the first binding row matching the entry's prefix and source.
+; In : a3 = entry, d2 = MountCfg ; Out: a0 = row, 0 = none
+;===========================================================
+_actFindBind:
+	movem.l	d0-d4,-(sp)
+	move.l	d2,a0
+	cmp.l	#mc_BindSize+4,mc_Size(a0)
+	blo.s	_afb_none
+	move.l	mc_BindSize(a0),d3
+	cmp.l	#bnd_Sizeof,d3
+	blo.s	_afb_none
+	move.l	mc_BindCount(a0),d4
+	move.l	mc_Binds(a0),d0
+	beq.s	_afb_none
+	move.l	d0,a0
+	bsr	_actPrefix
+	move.l	d0,d1			;d1 = entry prefix
+	moveq.l	#0,d2
+	move.b	pe_Source(a3),d2	;d2 = source bit
+_afb_loop:
+	subq.l	#1,d4
+	bcs.s	_afb_none
+	move.l	bnd_Prefix(a0),d0
+	beq.s	_afb_src		;0 = any prefix
+	cmp.l	d1,d0
+	bne.s	_afb_next
+_afb_src:
+	move.b	bnd_Sources(a0),d0
+	beq.s	_afb_hit		;0 = any source
+	btst	d2,d0
+	bne.s	_afb_hit
+_afb_next:
+	add.l	d3,a0
+	bra.s	_afb_loop
+_afb_none:
+	sub.l	a0,a0
+_afb_hit:
+	movem.l	(sp)+,d0-d4
 	rts
 
 ;===========================================================

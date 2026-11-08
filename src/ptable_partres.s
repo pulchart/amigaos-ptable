@@ -126,8 +126,9 @@ _pgr_end:
 ; cfd mount worker, a fat95 auto-detect handler, the cold stage)
 ; cannot interleave scan/publish/act. Lock order: PTR_Lock is the
 ; OUTER lock; DOS list locks are only ever taken inside it.
-; Deadlock-free because the acts only STARTPROC explicit-geometry
-; nodes, whose handler never calls back into a ptable LVO at startup.
+; MountPartitions starts handlers (ADNF_STARTPROC) under it: a handler
+; that calls a ptable LVO before replying to its startup packet
+; deadlocks the caller.
 ;
 ; _partLockRes:   a5 = ExecBase -> d0 = resource (0 = fail, not locked)
 ; _partUnlockRes: a5 = ExecBase; preserves all registers
