@@ -182,19 +182,8 @@ _srn_pr_loop:
 	move.l	d4,d0
 	mulu.w	#PR_Sizeof,d0
 	lea	0(a2,d0.l),a3		;a3 = &PartRec[d4]
-;-- boot-block sanity gate before publishing
-	move.l	PR_StartLBA(a3),d0
-	bsr	_psReadLBA
-	tst.l	d0
-	bne.s	_srn_pr_next
-	cmpi.w	#$55AA,510(a0)
-	bne.s	_srn_pr_next
-	bsr	_partIsBootBlock
-	tst.l	d0
-	beq.s	_srn_pr_next
 	bsr	_scanPubRec		;a3 = &PartRec, d6 = source
 	add.l	d0,d7
-_srn_pr_next:
 	addq.l	#1,d4
 	bra.s	_srn_pr_loop
 _srn_pr_done:

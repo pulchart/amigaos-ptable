@@ -178,9 +178,12 @@ def scanner_cases(image, eq, check):
          [(eq['PES_MBR'], 100, 8)]),
         ('block zero read fails', gpt, []),
         ('GPT header read fails', {0: protective, 2: gpt[2], 200: fat_boot()}, []),
-        ('partition read fails', {0: ordinary}, []),
-        ('partition signature absent', {0: ordinary, 100: fat_boot(signature=b'\0\0')}, []),
-        ('partition BPB invalid', {0: ordinary, 100: bytes(510) + b'\x55\xaa'}, []),
+        # The partition contents are not examined: the handler decides.
+        ('partition unreadable', {0: ordinary}, [(eq['PES_MBR'], 100, 8)]),
+        ('partition signature absent', {0: ordinary, 100: fat_boot(signature=b'\0\0')},
+         [(eq['PES_MBR'], 100, 8)]),
+        ('partition BPB invalid', {0: ordinary, 100: bytes(510) + b'\x55\xaa'},
+         [(eq['PES_MBR'], 100, 8)]),
         ('empty flat medium not published', {0: fat_boot(total=0)}, []),
     ]
     # A valid BPB at LBA0 takes precedence over protective MBR bytes.
@@ -196,14 +199,15 @@ def scanner_cases(image, eq, check):
         finally:
             w.close()
 
-    # A primary failing the boot gate does not stop the logicals behind it.
+    # Logicals are published behind the primaries.
     blocks = {0: mbr([(0, 0x06, 100, 8), (0, 0x0c, 200, 8), (0, 0x0f, 1000, 100)]),
-              100: fat_boot(), 1000: ebr((0, 0x0c, 10, 8)), 1010: fat_boot()}
+              1000: ebr((0, 0x0c, 10, 8))}
     w = Scanner(image, eq, blocks)
     try:
         n = w.run('_scanRun', context=w.CTX)
         check('scan MBR logical published', (n, w.published),
-              (2, [(eq['PES_MBR'], 100, 8), (eq['PES_MBR'], 1010, 8)]))
+              (3, [(eq['PES_MBR'], 100, 8), (eq['PES_MBR'], 200, 8),
+                   (eq['PES_MBR'], 1010, 8)]))
     finally:
         w.close()
 
