@@ -848,6 +848,12 @@ _amo_stamped:
 	clr.b	d1
 	cmp.l	#DOSTYPE_FAT,d1
 	bne.w	_amo_create
+;-- for a FAT entry: another filesystem's entry needs its own node
+	move.l	d0,d1
+	bsr	_actPrefix
+	cmp.l	#DOSTYPE_FAT,d0
+	exg	d0,d1			;d0 = node again (exg keeps the flags)
+	bne.w	_amo_create
 	bsr	_actResolveCfg		;record MFlg/Ctrl/NodeDosType for the entry
 	move.l	d0,pe_DevNode(a3)
 	bset	#PEB_MOUNTED,d3
