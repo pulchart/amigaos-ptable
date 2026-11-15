@@ -283,7 +283,8 @@ BC_Geometry	= 144		;struct DriveGeometry from TD_GETGEOMETRY
 BC_ScanErr	= 176		;byte: a read failed during this scan's walk
 BC_BlockShift	= 177		;byte: log2 of the device block size, 9..12
 BC_Medium	= 180		;device blocks on the medium, 0 = unknown
-BC_Sizeof	= 184
+BC_Bind		= 184		;APTR binding row of the entry being built, 0 = none
+BC_Sizeof	= 188
 
 BC_BUF_BYTES	= 4096		;the largest device block read
 

@@ -482,6 +482,24 @@ the next reference. The library copies the string, which it does not own
 past the call; a handler path longer than 23 characters builds no node,
 and a CONTROL string is clamped to 31.
 
+@{b}Binding rows@{ub} ( @{fg shine}mc_Binds@{fg text} , @{fg shine}mc_BindCount@{fg text} rows of @{fg shine}mc_BindSize@{fg text} bytes, read
+when @{fg shine}mc_Size@{fg text} >= 40) extend this to any filesystem and to RDB partitions.
+The first row whose DosType prefix ( @{fg shine}bnd_Prefix@{fg text} , @{fg shine}0@{fg text} = any) and table
+mask ( @{fg shine}bnd_Sources@{fg text} , @{fg shine}1 << PES_*@{fg text} , @{fg shine}0@{fg text} = any) match the partition applies;
+with no match, @{fg shine}mc_NodeDosType@{fg text} / @{fg shine}mc_NodeHandler@{fg text} apply as above. A row
+gives:
+
+  * @{fg shine}bnd_DosType@{fg text}: as @{fg shine}mc_NodeDosType@{fg text}, never applied to RDB partitions.
+  * @{fg shine}bnd_Handler@{fg text} : as @{fg shine}mc_NodeHandler@{fg text} , for any partition. With @{fg shine}BNDB_FORCE@{fg text} the path
+    is used before @{fg shine}FileSystem.resource@{fg text} , like @{fg shine}ForceLoad@{fg text} in a mountlist.
+  * @{fg shine}bnd_Stack@{fg text} : the node's minimum @{fg shine}dn_StackSize@{fg text} , over the default or the
+    @{fg shine}FileSysEntry@{fg text} value.
+  * @{fg shine}bnd_Pri@{fg text}: the node's @{fg shine}dn_Priority@{fg text}, with @{fg shine}BNDB_PRI@{fg text}.
+
+So an RDB partition whose filesystem is neither in the RDB nor resident
+mounts from a path, and a resident handler can be overridden by one on
+disk.
+
 A fixed window does not follow a card swap the way the auto-detect
 scheme does, so it belongs with a teardown detach policy rather than
 with @{fg shine}MarkAbsent@{fg text} . The failure mode is benign either way: a handler
@@ -720,12 +738,13 @@ Notes a consumer needs:
     @{fg shine}MarkAbsent@{fg text} it only attempts the lock, and skips when a teardown holds it.
   * @{fg shine}cfg@{fg text} is a @{fg shine}MountCfg@{fg text} (or @{fg shine}0@{fg text} for cold-boot defaults): global @{fg shine}mc_Flags@{fg text} and
     @{fg shine}mc_Control@{fg text} plus a 0-terminated per-dostype override table, resolved by
-    @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} , and @{fg shine}mc_NodeDosType@{fg text} / @{fg shine}mc_NodeHandler@{fg text} . The override
-    row is deliberately not grown for new settings: the library strides that table
-    with its own idea of the row size, so a caller built against a different
-    header would desynchronise. New settings go in the @{fg shine}mc_@{fg text} block, behind @{fg shine}mc_Size@{fg text} -
-    the caller's own @{fg shine}mc_Sizeof@{fg text} , MountCfg's @{fg shine}de_TableSize@{fg text} : a field appended in a
-    later release is read only when the caller's declared size covers it.
+    @{fg shine}(pe_DosType & $FFFFFF00)@{fg text} , @{fg shine}mc_NodeDosType@{fg text} / @{fg shine}mc_NodeHandler@{fg text} , and the binding
+    rows. The override row is deliberately not grown for new settings: the library
+    strides that table with its own idea of the row size, so a caller built
+    against a different header would desynchronise. New settings go in the @{fg shine}mc_@{fg text}
+    block, behind @{fg shine}mc_Size@{fg text} - the caller's own @{fg shine}mc_Sizeof@{fg text} , MountCfg's @{fg shine}de_TableSize@{fg text} :
+    a field appended in a later release is read only when the caller's declared
+    size covers it.
   * @{fg shine}prefixList@{fg text} is a 0-terminated list of dostype high three bytes, e.g. @{fg shine}$50465300@{fg text}
     for @{fg shine}PFS@{fg text} .
   * @{fg shine}BootScanPartitions@{fg text} also registers a synthetic ConfigDev (Vendor ID @{fg shine}65535@{fg text} ,
@@ -773,9 +792,10 @@ runs.
 
   * @{"  __PAIRED_0__  " link "lsptres.guide/Main"} : the @{fg shine}lsptres@{fg text} CLI lists @{fg shine}partition.resource@{fg text} , every partition this library has
     published, its mount state, and the resolved Flags and CONTROL.
-  * @{fg shine}cfd.prefs@{fg text} : the @{fg shine}FLAGS@{fg text} , @{fg shine}CONTROL@{fg text} , @{fg shine}DOSTYPE_FAT@{fg text} and @{fg shine}HANDLER_FAT@{fg text} keys that
-    @{fg shine}compactflash.device@{fg text} turns into the @{fg shine}MountCfg@{fg text} for @{fg shine}MountPartitions@{fg text} . Its
-    automount guide is the worked example for choosing a filesystem.
+  * @{fg shine}cfd.prefs@{fg text} : the @{fg shine}FLAGS@{fg text} , @{fg shine}CONTROL@{fg text} and per-filesystem @{fg shine}HANDLER_<fs>@{fg text} , @{fg shine}DOSTYPE_<fs>@{fg text}
+    , @{fg shine}FORCE_<fs>@{fg text} , @{fg shine}STACK_<fs>@{fg text} , @{fg shine}PRI_<fs>@{fg text} keys that @{fg shine}compactflash.device@{fg text} turns into
+    the @{fg shine}MountCfg@{fg text} for @{fg shine}MountPartitions@{fg text} . Its automount guide is the worked example
+    for choosing a filesystem.
   * @{fg shine}compactflash.device@{fg text} (https://github.com/pulchart/cfd): the primary consumer
     (cold-boot autoboot + hotplug automount).
   * @{fg shine}fat95@{fg text} (https://github.com/pulchart/fat95): reads @{fg shine}partition.resource@{fg text} for

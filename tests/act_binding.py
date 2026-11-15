@@ -13,7 +13,8 @@ import sys
 import mockdev as md
 from mockexec import Rig, builds
 
-ENTRY, CTX, CFG, OVR, CTRL, PATH = 0x48000, 0x49000, 0x4A000, 0x4A100, 0x4A200, 0x4A300
+ENTRY, CTX, CFG, OVR, CTRL, PATH, BIND = (0x48000, 0x49000, 0x4A000, 0x4A100, 0x4A200,
+                                         0x4A300, 0x4A400)
 FAT, MARKER, DOS3 = 0x46415400, 0x464154FF, 0x444F5303
 PES_MBR, PES_RDB, PES_FLAT = 0, 2, 3
 
@@ -37,9 +38,9 @@ class Resolve:
         self.mem.w32(ENTRY + eq['pe_Envec'], 16)
         self.mem.w32(ENTRY + eq['pe_Envec'] + 4 * 16, envec_dostype)
 
-    def cfg(self, flags=0, control=None, overrides=(), node_dostype=0, handler=None):
+    def cfg(self, flags=0, control=None, overrides=(), node_dostype=0, handler=None, binds=()):
         eq = self.eq
-        self.mem.w_block(CFG, bytes(eq['mc_UnmFlags'] + 4))
+        self.mem.w_block(CFG, bytes(eq['mc_BindSize'] + 4))
         self.mem.w32(CFG + eq['mc_Flags'], flags)
         if control:
             self.mem.w_block(CTRL, cstr(control))
@@ -57,6 +58,21 @@ class Resolve:
             self.mem.w_block(PATH, cstr(handler))
             self.mem.w32(CFG + eq['mc_NodeHandler'], PATH)
         self.mem.w32(CFG + eq['mc_Size'], eq['mc_UnmFlags'] + 4)
+        if binds:
+            # rows (prefix, sources, dostype, handler); 4 bytes more than this
+            # build's row, as a newer caller would pass
+            size = eq['bnd_Sizeof'] + 4
+            for i, (prefix, sources, dostype, path) in enumerate(binds):
+                row = BIND + i * size
+                self.mem.w_block(row, bytes(size))
+                self.mem.w32(row + eq['bnd_Prefix'], prefix)
+                self.mem.w8(row + eq['bnd_Sources'], sources)
+                self.mem.w32(row + eq['bnd_DosType'], dostype)
+                self.mem.w32(row + eq['bnd_Handler'], path)
+            self.mem.w32(CFG + eq['mc_Binds'], BIND)
+            self.mem.w32(CFG + eq['mc_BindCount'], len(binds))
+            self.mem.w32(CFG + eq['mc_BindSize'], size)
+            self.mem.w32(CFG + eq['mc_Size'], eq['mc_BindSize'] + 4)
 
     def run(self):
         eq = self.eq
@@ -67,7 +83,8 @@ class Resolve:
         return {'flags': self.mem.r32(ENTRY + eq['pe_MountFlags']),
                 'control': bytes(self.mem.r_block(nb + 1, self.mem.r8(nb))).decode(),
                 'nodedt': self.mem.r32(ENTRY + eq['pe_NodeDosType']),
-                'handler': self.mem.r32(CTX + eq['BC_NodeHandler'])}
+                'handler': self.mem.r32(CTX + eq['BC_NodeHandler']),
+                'bind': self.mem.r32(CTX + eq['BC_Bind'])}
 
     def prefix(self, dostype):
         self.mem.w32(ENTRY + self.eq['pe_DosType'], dostype)
@@ -114,6 +131,32 @@ def cases(build):
         r.cfg(node_dostype=FAT | 1, handler='L:fat95')
         got = r.run()
         out.append(('RDB row ignores mc_Node*', (got['nodedt'], got['handler']), (DOS3, 0)))
+
+        rows = [(0x444F5300, 0, 0, PATH + 0x10), (FAT, 1 << PES_MBR, 0, PATH + 0x20),
+                (FAT, 0, FAT | 2, PATH + 0x30)]
+        r.row(PES_FLAT, FAT, 0x8000)
+        r.cfg(node_dostype=FAT | 1, handler='L:fat95', binds=rows)
+        got = r.run()
+        out.append(('flat row takes the first matching FAT row',
+                    (got['nodedt'], got['handler'], got['bind']),
+                    (FAT | 2, PATH + 0x30, BIND + 2 * (build.eq['bnd_Sizeof'] + 4))))
+
+        r.row(PES_FLAT, FAT, 0)
+        r.cfg(binds=rows[2:])
+        got = r.run()
+        out.append(('row DosType, size unknown: auto-detect node', got['nodedt'], MARKER))
+
+        r.row(PES_RDB, FAT | 1, 0x8000, envec_dostype=FAT | 1)
+        r.cfg(binds=rows[2:])
+        got = r.run()
+        out.append(('RDB row: path from the row, no DosType', (got['nodedt'], got['handler']),
+                    (FAT | 1, PATH + 0x30)))
+
+        r.row(PES_MBR, FAT, 0x8000)
+        r.cfg(node_dostype=FAT | 1, handler='L:fat95', binds=[(0x53465300, 0, 0, PATH + 0x10)])
+        got = r.run()
+        out.append(('no matching row: mc_Node*', (got['nodedt'], got['handler'], got['bind']),
+                    (FAT | 1, PATH, 0)))
     finally:
         r.rig.close()
     return out
