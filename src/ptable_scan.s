@@ -174,20 +174,27 @@ _srn_pubflat:
 ;- - MBR / GPT: walker -> PartRec[] -> publish - - - - - - -
 _srn_mbr:
 	PTMSG	dbg_pt_mbr
-	lea	-(PART_MAX_REC*PR_Sizeof)(sp),sp		;PART_MAX_REC * PR_Sizeof
-	move.l	sp,a2			;a2 = PartRec buffer
-	move.l	BC_BlockBuf(a4),a0
-	lea	_psReadLBA(pc),a3	;EBR chain reader
-	bsr	_partScanMBR
 	moveq.l	#PES_MBR,d6
-	bra.s	_srn_pubrecs
+	bra.s	_srn_table
 _srn_gpt:
 	PTMSG	dbg_pt_gpt
-	lea	-(PART_MAX_REC*PR_Sizeof)(sp),sp
-	move.l	sp,a2
-	lea	_psReadLBA(pc),a3
-	bsr	_partScanGPT
 	moveq.l	#PES_GPT,d6
+_srn_table:
+	move.l	#PART_MAX_REC*PR_Sizeof,d0
+	moveq.l	#MEMF_PUBLIC,d1
+	move.l	a5,a6
+	jsr	AllocMem(a6)
+	tst.l	d0
+	beq.w	_srn_rderr		;not walked: keep the rows as they are
+	move.l	d0,a2			;a2 = PartRec buffer
+	move.l	BC_BlockBuf(a4),a0	;block 0 for the MBR walker
+	lea	_psReadLBA(pc),a3	;EBR / GPT block reader
+	cmp.b	#PES_GPT,d6
+	beq.s	_srn_walkgpt
+	bsr	_partScanMBR
+	bra.s	_srn_pubrecs
+_srn_walkgpt:
+	bsr	_partScanGPT
 _srn_pubrecs:
 	move.l	d0,d5			;d5 = record count
 	tst.b	BC_ScanErr(a4)		;table not read in full: keep the
@@ -206,8 +213,10 @@ _srn_pr_loop:
 	addq.l	#1,d4
 	bra.s	_srn_pr_loop
 _srn_pr_done:
-	lea	(PART_MAX_REC*PR_Sizeof)(sp),sp
-
+	move.l	a2,a1
+	move.l	#PART_MAX_REC*PR_Sizeof,d0
+	move.l	a5,a6
+	jsr	FreeMem(a6)
 	bra.s	_srn_out
 _srn_rderr:
 	st	BC_ScanErr(a4)
