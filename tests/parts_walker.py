@@ -185,6 +185,13 @@ def scanner_cases(image, eq, check):
         ('partition BPB invalid', {0: ordinary, 100: bytes(510) + b'\x55\xaa'},
          [(eq['PES_MBR'], 100, 8)]),
         ('empty flat medium not published', {0: fat_boot(total=0)}, []),
+        # A slot table is a partition table only when every status byte is
+        # 00 or 80 and some slot has a type.
+        ('slot status 01 is not a table', {0: mbr([(0x01, 0x0c, 100, 8)]), 100: fat_boot()}, []),
+        ('empty slot table is not a table', {0: mbr([])}, []),
+        ('status 80 and 00 slots are a table',
+         {0: mbr([(0x80, 0x83, 50, 8), (0, 0x0c, 100, 8)]), 100: fat_boot()},
+         [(eq['PES_MBR'], 100, 8)]),
     ]
     # A valid BPB at LBA0 takes precedence over protective MBR bytes.
     flat = bytearray(fat_boot())

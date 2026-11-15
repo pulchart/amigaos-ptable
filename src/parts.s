@@ -292,6 +292,35 @@ _psg_guids:
 	dc.l	$28732AC1,$1FF8D211,$BA4B00A0,$C93EC93B
 
 ;===========================================================
+; _partIsMBR - is the slot table of a $55AA block a partition table?
+; Every status byte is $00 or $80 and at least one slot has a type.
+;
+; Input : a0 = &block (512 bytes)
+; Output: d0 = -1 (partition table) or 0
+; Clobbers d0/d1/a1.
+;===========================================================
+_partIsMBR:
+	lea	446(a0),a1
+	moveq.l	#3,d1
+	moveq.l	#0,d0			;d0.b = types or-ed together
+_pim_slot:
+	tst.b	(a1)
+	beq.s	_pim_status
+	cmpi.b	#$80,(a1)
+	bne.s	_pim_no
+_pim_status:
+	or.b	4(a1),d0
+	lea	16(a1),a1
+	dbra	d1,_pim_slot
+	tst.b	d0
+	beq.s	_pim_no
+	moveq.l	#-1,d0
+	rts
+_pim_no:
+	moveq.l	#0,d0
+	rts
+
+;===========================================================
 ; _partIsBootBlock - FAT boot-sector sanity gate (rejects NTFS).
 ;
 ; Input : a0 = &block (512 bytes)
