@@ -1,6 +1,6 @@
 # ptable.library: unified partition-table library
 
-`ptable.library` parses every partition scheme a removable card might carry (**RDB**, **MBR**, **GPT**, and the partition-table-less **flat** superfloppy, a whole-disk FAT volume) and publishes the result into `partition.resource`. Any driver or handler reads the layout from there instead of parsing the card itself, so one parse is shared rather than repeated.
+`ptable.library` parses every partition scheme a removable card might carry (**RDB**, **MBR**, **GPT**, and **flat**, a medium without a partition table) and publishes the result into `partition.resource`. Any driver or handler reads the layout from there instead of parsing the card itself, so one parse is shared rather than repeated.
 
 You never run it yourself; other components open it. This document explains what it does, what you see when it works, and how its behaviour is configured. The `lsptres` tool (see [`lsptres.md`](lsptres.md)) shows what it has discovered at runtime. The library ships alongside its consumer `compactflash.device`, or embedded in a Kickstart ROM for cold-boot autoboot (see the [amigaos-kickstart-builder](https://github.com/pulchart/amigaos-kickstart-builder) repo).
 
@@ -11,6 +11,8 @@ Two jobs, at two different times.
 **Cold-boot autoboot.** At Kickstart cold start, before DOS exists, the `compactflash.autoboot` cold stub (a romtag inside `compactflash.automount`) calls `BootScanPartitions`. The library scans the card, publishes every partition it finds into `partition.resource`, loads any filesystem handlers stored in the RDB into `FileSystem.resource`, and then registers the **RDB** partitions: the bootable ones with `AddBootNode` so they appear in the Early Startup boot menu, the rest with `AddDosNode`. This is what lets you boot straight off an RDB-partitioned card in the PCMCIA slot.
 
 MBR, GPT and flat partitions are published but not registered at cold boot: DOS does not exist yet, so their mount configuration cannot be read. The DOS-time automount mounts them a moment later.
+
+A **flat** row covers a whole medium without a partition table, sized from `TD_GETGEOMETRY` (0 when the device does not report it). When block 0 starts with an Amiga DosType (three letters `A`-`Z` and a byte below `$20`, e.g. `DOS\1`, `PFS\3`, `SFS\0`), the row carries that DosType and its node covers the whole medium, which needs the size. Any other block 0, with or without a FAT boot block or `$55AA`, gives `FAT\0` and the auto-detect node; the handler reads block 0 and decides. Block 0 is an MBR only when every slot status byte is `$00` or `$80` and a slot has a type.
 
 Registering a partition needs a handler for its filesystem already in `FileSystem.resource`. FAT partitions match any registered `FAT\x` handler, every other filesystem must match its DosType exactly. With no handler the partition stays published but unmounted, listed by `lsptres` as `P----`.
 
@@ -121,7 +123,7 @@ BootPri, stored in the partition environment, does not decide bootability; it or
 
 **2. The consumer's mount configuration (`MountCfg`, DOS-time path).** `MountPartitions` takes an optional `MountCfg` supplying a global mount `Flags` value, a global `CONTROL` string, a per-filesystem override table, and the pair `mc_NodeDosType` / `mc_NodeHandler`. The library resolves each partition's `Flags` and `CONTROL` by its DosType (matching the high three bytes, e.g. `FAT\0`), falling back to the global value. Passing `0` selects cold-boot defaults.
 
-`mc_NodeDosType` and `mc_NodeHandler` decide **which filesystem serves a partition** whose envec this library synthesized, i.e. one from an MBR, GPT or flat (whole-disk FAT) card rather than an RDB. They are described under [Choosing the filesystem](#choosing-the-filesystem) below.
+`mc_NodeDosType` and `mc_NodeHandler` decide **which filesystem serves a partition** whose envec this library synthesized, i.e. one from an MBR, GPT or flat card rather than an RDB. They are described under [Choosing the filesystem](#choosing-the-filesystem) below.
 
 For `compactflash.device` these values come from `ENV:cfd.prefs`: the `FLAGS` and `CONTROL` keys, global and `_<fs>` per filesystem. So to change how hotplugged cards mount, you edit `cfd.prefs`, not `ptable.library`. The resolved values are recorded per partition and shown live by `lsptres` in its `MFlg` and `Ctrl` columns.
 
@@ -129,10 +131,10 @@ The full user-facing reference for the `cfd.prefs` keys, plus deployment default
 
 ### Choosing the filesystem
 
-`mc_NodeDosType` and `mc_NodeHandler` decide which filesystem serves a partition that came from an MBR or GPT table or a flat (whole-disk FAT) card. They apply to FAT-family entries only, and never to RDB: an RDB envec is the card's own, its `de_LowCyl`/`de_HighCyl` are real cylinders against real `de_Surfaces`/`de_BlocksPerTrack`, and writing block counts into those fields would be nonsense.
+`mc_NodeDosType` and `mc_NodeHandler` decide which filesystem serves a partition that came from an MBR or GPT table or a flat card. They apply to FAT entries only, and never to RDB: an RDB envec is the card's own, its `de_LowCyl`/`de_HighCyl` are real cylinders against real `de_Surfaces`/`de_BlocksPerTrack`, and writing block counts into those fields would be nonsense.
 
 - **Neither set:** the envec stays exactly as the scan built it and the handler comes from `FileSystem.resource`. This is the default and is unchanged.
-- **`mc_NodeDosType` set:** the node carries that DosType and gets the partition's own block range in `de_LowCyl`/`de_HighCyl`. The handler still comes from `FileSystem.resource`.
+- **`mc_NodeDosType` set:** the node carries that DosType and gets the partition's own block range in `de_LowCyl`/`de_HighCyl`. The handler still comes from `FileSystem.resource`. A flat row whose size the device did not report keeps the auto-detect envec.
 - **`mc_NodeHandler` set:** the envec is untouched, so auto-detect is preserved; the path is used only if `FileSystem.resource` has nothing for the node's DosType.
 - **Both set:** that DosType, that window, and the path as the fallback for the lookup.
 
@@ -203,7 +205,7 @@ A FAT card at cold boot is published and left for DOS time, which is what the ot
 [MW] mounted volumes: 3
 ```
 
-`[PT] reusing handler <name>` appears in place of `mounted` when a DOS node of that name already exists and is rebound instead of created, and `[PT] mounted as <name>` when a handler overlays its own DOS name through `RegisterPartition`. A whole-disk card prints `[PT] whole-disk FAT (superfloppy)` in place of a partition-table line.
+`[PT] reusing handler <name>` appears in place of `mounted` when a DOS node of that name already exists and is rebound instead of created, and `[PT] mounted as <name>` when a handler overlays its own DOS name through `RegisterPartition`. A whole-disk card prints `[PT] whole-disk FAT (superfloppy)` in place of a partition-table line, or `[PT] whole medium, no partition table` when block 0 carries `$55AA` but neither a FAT boot block nor a partition table.
 
 The resulting `partition.resource`, listed by `lsptres` (columns explained in [`lsptres.md`](lsptres.md)):
 

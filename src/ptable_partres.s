@@ -32,6 +32,10 @@ dbg_pt_gpt:
 	dc.b	"[PT] GPT partition table",LF,0
 dbg_pt_flat:
 	dc.b	"[PT] whole-disk FAT (superfloppy)",LF,0
+dbg_pt_whole:
+	dc.b	"[PT] whole medium, no partition table",LF,0
+dbg_pt_tagged:
+	dc.b	"[PT] whole medium, Amiga DosType at block 0",LF,0
 dbg_pt_mnt:
 	dc.b	"[PT] mounting partitions",LF,0
 dbg_pt_umnt:
