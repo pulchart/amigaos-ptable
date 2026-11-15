@@ -354,6 +354,33 @@ _afs_last:
 	bcc.s	_afs_lok
 	moveq.l	#-1,d5
 _afs_lok:
+;-- in 512-byte blocks, as the node windows below; past 32 bits saturates
+	moveq.l	#0,d1
+	move.b	pe_BlockShift(a3),d1
+	sub.l	#9,d1
+	bls.s	_afs_units		;512-byte blocks (or unstamped)
+	move.l	d4,d0
+	lsl.l	d1,d4
+	move.l	d4,d2
+	lsr.l	d1,d2
+	cmp.l	d0,d2
+	beq.s	_afs_s1
+	moveq.l	#-1,d4
+_afs_s1:
+	move.l	d5,d0
+	lsl.l	d1,d5
+	move.l	d5,d2
+	lsr.l	d1,d2
+	cmp.l	d0,d2
+	beq.s	_afs_s2
+	moveq.l	#-1,d5
+	bra.s	_afs_units
+_afs_s2:
+	moveq.l	#-1,d0			;d5 = last 512-byte block of the last block
+	lsl.l	d1,d0
+	not.l	d0
+	or.l	d0,d5
+_afs_units:
 	move.l	a5,a6
 	jsr	Forbid(a6)
 	lea	378(a6),a0		;ExecBase LibList

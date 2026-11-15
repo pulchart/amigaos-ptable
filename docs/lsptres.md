@@ -42,9 +42,9 @@ Verbose (`VERBOSE` / `V`) appends:
 | Column | Meaning |
 |--------|---------|
 | CMD | Read command used for the device: `NSCMD`, `TD64`, `SCSI` or `CMD`. |
-| Start | Start block (LBA). |
-| Blocks | Block count. |
-| Size | Size in MiB, or kiB below 1 MiB. Both are binary: a block is 512 bytes. |
+| Start | Start block (LBA), in the device's blocks. |
+| Blocks | Block count, in the device's blocks. |
+| Size | Size in MiB, or kiB below 1 MiB. Both are binary; the block size comes from the resource (layout 6), else 512 bytes. |
 
 ## Examples
 

@@ -20,6 +20,7 @@ _scanRun:
 	movem.l	d2-d7/a2-a3/a6,-(sp)
 	moveq.l	#0,d7			;d7 = published count
 	clr.b	BC_ScanErr(a4)
+	bsr	_scanGeometry		;block size and medium size
 
 ;-- whole-unit reconcile: once the medium is classified, PRESENT is cleared
 ;   for this device+unit (_scanClearPresent); the publishers re-set it on the
@@ -39,7 +40,15 @@ _srn_rdsk:
 	bne.s	_srn_rdsk_next
 	moveq.l	#9,d1			;fields read reach long index 8
 	bsr	_bootBlockOK
+	bne.s	_srn_rdsk_next
+	moveq.l	#0,d0			;an RDB of another block size cannot
+	move.b	BC_BlockShift(a4),d0	;be walked in this device's blocks
+	moveq.l	#1,d1
+	lsl.l	d0,d1
+	cmp.l	rdb_BlockBytes(a0),d1
 	beq.w	_srn_rdb
+	bsr	_scanClearPresent	;an RDB disk this scan cannot walk: no
+	bra.w	_srn_out		;rows, not one over the whole medium
 _srn_rdsk_next:
 	addq.l	#1,d6
 	cmp.l	#RDB_LOCATION_LIMIT,d6
@@ -166,7 +175,7 @@ _srn_fatflat:
 	move.l	#DOSTYPE_FAT,d2
 _srn_pubflat:
 	bsr	_scanClearPresent
-	bsr	_scanMediumBlocks	;d1 = medium size, 0 = unknown
+	move.l	BC_Medium(a4),d1	;d1 = medium size, 0 = unknown
 	bsr	_scanPubFlat		;d1 = size, d2 = DosType
 	add.l	d0,d7
 	bra.w	_srn_out
@@ -194,6 +203,8 @@ _srn_table:
 	bsr	_partScanMBR
 	bra.s	_srn_pubrecs
 _srn_walkgpt:
+	moveq.l	#0,d1
+	move.b	BC_BlockShift(a4),d1
 	bsr	_partScanGPT
 _srn_pubrecs:
 	move.l	d0,d5			;d5 = record count
@@ -338,6 +349,20 @@ _frd_nm:
 	move.b	d0,pe_Flags(a3)
 	move.l	pb_Environment+DE_BOOTPRI*4(a2),pe_BootPri(a3)
 	move.l	pb_Environment+DE_DOSTYPE*4(a2),pe_DosType(a3)
+;-- RDB rows count blocks of the envec's SizeBlock; its log2 when that is a
+;   power of two, else 0 (unknown)
+	moveq.l	#0,d0
+	move.l	pb_Environment+DE_SizeBlock*4(a2),d1
+	beq.s	_frd_bs
+	moveq.l	#1,d0			;SizeBlock counts longs: +2
+_frd_bsl:
+	addq.l	#1,d0
+	lsr.l	#1,d1
+	bcc.s	_frd_bsl
+	beq.s	_frd_bs			;no bit left above the lowest
+	moveq.l	#0,d0			;more than one bit set
+_frd_bs:
+	move.b	d0,pe_BlockShift(a3)
 	lea	pb_Environment(a2),a0
 	lea	pe_Envec(a3),a1
 	move.l	d2,d3
@@ -426,6 +451,7 @@ _sfr_nb:
 	or.b	d1,d2
 	move.b	d2,pe_Flags(a3)
 	move.l	PR_DosType(a2),pe_DosType(a3)
+	move.b	BC_BlockShift(a4),pe_BlockShift(a3)
 	move.l	PR_StartLBA(a2),pe_StartLBA(a3)
 	move.l	PR_BlockCount(a2),pe_BlockCount(a3)
 	lea	pe_Envec(a3),a0
@@ -438,23 +464,37 @@ _sfr_nb:
 	rts
 
 ;===========================================================
-; _scanMediumBlocks: medium size in 512-byte blocks from TD_GETGEOMETRY.
-; In : a4 = &BootCtx (unit open), a5 = ExecBase
-; Out: d1 = blocks, 0 = unknown (no geometry, or another sector size);
-;      clobbers d0
+; _scanGeometry: TD_GETGEOMETRY -> BC_BlockShift and BC_Medium.
+; A sector size of 512, 1024, 2048 or 4096 bytes sets the block shift; an
+; unset one (0) means 512. A failed command or any other size leaves 512
+; and an unknown medium size.
+; In : a4 = &BootCtx (unit open), a5 = ExecBase. Clobbers d0-d2.
 ;===========================================================
-_scanMediumBlocks:
-	moveq.l	#0,d1
+_scanGeometry:
+	moveq.l	#9,d1			;d1 = shift
+	moveq.l	#0,d2			;d2 = medium blocks
 	bsr	_bootGeometry
 	tst.l	d0
-	bne.s	_smb_out
+	bne.s	_sgeo_set
+	move.l	BC_Geometry+DG_TotalSectors(a4),d2
 	move.l	BC_Geometry+DG_SectorSize(a4),d0
-	beq.s	_smb_have		;unset: the driver works in 512-byte blocks
+	beq.s	_sgeo_set		;unset: the driver works in 512-byte blocks
+_sgeo_find:				;halve the size down to 512, counting
 	cmp.l	#512,d0
-	bne.s	_smb_out
-_smb_have:
-	move.l	BC_Geometry+DG_TotalSectors(a4),d1
-_smb_out:
+	beq.s	_sgeo_set
+	bcs.s	_sgeo_bad		;below 512
+	btst	#0,d0
+	bne.s	_sgeo_bad		;not a power of two
+	lsr.l	#1,d0
+	addq.l	#1,d1
+	cmp.l	#12,d1
+	bls.s	_sgeo_find
+_sgeo_bad:
+	moveq.l	#9,d1			;unsupported size: 512, size unknown
+	moveq.l	#0,d2
+_sgeo_set:
+	move.b	d1,BC_BlockShift(a4)
+	move.l	d2,BC_Medium(a4)
 	rts
 
 ;===========================================================
@@ -517,6 +557,7 @@ _scanFillFlat:
 	or.b	#1<<PEB_PRESENT,d0
 	move.b	d0,pe_Flags(a3)
 	move.l	d2,pe_DosType(a3)
+	move.b	BC_BlockShift(a4),pe_BlockShift(a3)
 	clr.l	pe_StartLBA(a3)
 	move.l	d3,pe_BlockCount(a3)
 	lea	pe_Envec(a3),a0
@@ -799,13 +840,23 @@ s_dotdevice:
 ; (used by ScanViaPtable to select) and pe_DosType (FAT, for the candidate
 ; filter + lsptres) are kept by the caller; only the node envec is synthesized
 ; here.
-; Fake CHS: Surfaces=1, BlocksPerTrack=1 -> 1 block per cylinder.
-; In : a0 = &envec, d0 = StartLBA (unused), d1 = BlockCount, d2 = DosType (unused)
+; Fake CHS: Surfaces=1, BlocksPerTrack=1 -> 1 device block per cylinder.
+; In : a0 = &envec, d0 = StartLBA (unused), d1 = BlockCount, d2 = DosType
+;      (unused), a4 = &BootCtx (BC_BlockShift)
 ;===========================================================
 _scanFillEnvec:
-	movem.l	d3,-(sp)
+	movem.l	d3-d4,-(sp)
 	move.l	#16,DE_TableSize*4(a0)
-	move.l	#128,DE_SizeBlock*4(a0)
+	moveq.l	#0,d4
+	move.b	BC_BlockShift(a4),d4
+	moveq.l	#1,d3
+	lsl.l	d4,d3			;d3 = block size
+	move.l	d3,d4
+	lsr.l	#2,d4
+	move.l	d4,DE_SizeBlock*4(a0)	;in longs
+	neg.l	d3
+	and.l	#$0001FE00,d3		;largest transfer, whole blocks
+	move.l	d3,DE_MaxTransfer*4(a0)
 	clr.l	DE_SecOrg*4(a0)
 	move.l	#1,DE_Surfaces*4(a0)
 	move.l	#1,DE_SectorPerBlk*4(a0)
@@ -819,11 +870,10 @@ _scanFillEnvec:
 	move.l	d3,DE_HighCyl*4(a0)	;informational size; ignored when auto-detect
 	move.l	#30,DE_NumBuffers*4(a0)
 	clr.l	DE_BufMemType*4(a0)
-	move.l	#$0001FE00,DE_MaxTransfer*4(a0)
 	move.l	#$7FFFFFFE,DE_Mask*4(a0)
 	clr.l	DE_BOOTPRI*4(a0)
 	move.l	#DEVICE_DOSTYPE_MARKER,DE_DOSTYPE*4(a0)	;device-name scheme
-	movem.l	(sp)+,d3
+	movem.l	(sp)+,d3-d4
 	rts
 
 ;===========================================================

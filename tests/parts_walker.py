@@ -80,6 +80,7 @@ class Walker:
     def run(self, name, a0=0, context=0, regs=()):
         for i in range(16):
             self.cpu.w_reg(i, 0)
+        self.cpu.w_reg(1, 9)            # d1 = block shift, GPT only: 512 bytes
         self.cpu.w_reg(8, a0)           # a0 = loaded block, MBR only
         self.cpu.w_reg(10, BUF)         # a2 = output buffer
         self.cpu.w_reg(11, CB)          # a3 = block reader

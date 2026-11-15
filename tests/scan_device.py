@@ -18,7 +18,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds
 
-OPEN = {'A'}
+OPEN = set()
 
 FAT = 0x46415400
 PES_MBR, PES_GPT, PES_RDB, PES_FLAT = 0, 1, 2, 3
@@ -40,8 +40,8 @@ def clean(rig):
 def c_mbr512(b):
     disk = md.Disk(im.mbr_disk([(0x80, 0x0C, 2048, 0x8000), (0, 0x06, 0x9000, 0x4000)]))
     rig = scan(b, disk)
-    rows = [(r['source'], r['start'], r['count'], r['dostype']) for r in rig.rows()]
-    return rows == [(PES_MBR, 2048, 0x8000, FAT), (PES_MBR, 0x9000, 0x4000, FAT)] and clean(rig)
+    rows = [(r['source'], r['start'], r['count'], r['dostype'], r['raw'][173]) for r in rig.rows()]
+    return rows == [(PES_MBR, 2048, 0x8000, FAT, 9), (PES_MBR, 0x9000, 0x4000, FAT, 9)] and clean(rig)
 
 
 def c_gpt512(b):
@@ -114,8 +114,8 @@ def c_gpt4k(b):
     disk = md.Disk(im.gpt_disk([(im.MS_BASIC, 256, 4351)], bs=4096, total=1 << 18), bs=4096,
                    total=1 << 18)
     rig = scan(b, disk)
-    rows = [(r['start'], r['count']) for r in rig.rows()]
-    return rows == [(256, 4096)] and clean(rig)
+    rows = [(r['start'], r['count'], r['dostype'], r['raw'][173]) for r in rig.rows()]
+    return rows == [(256, 4096, FAT, 12)] and clean(rig)
 
 
 def c_rdb2048(b):
@@ -123,15 +123,60 @@ def c_rdb2048(b):
     env = im.envec(2, 101, 0x444F5303, size_block=512)
     disk = md.Disk(im.rdb_disk([('DH0', env, 1)], bs=2048), bs=2048)
     rig = scan(b, disk)
-    rows = [(r['name'], r['start'], r['count']) for r in rig.rows()]
-    return rows == [('DH0', 64, 3200)] and clean(rig)
+    rows = [(r['name'], r['start'], r['count'], r['raw'][173]) for r in rig.rows()]
+    return rows == [('DH0', 64, 3200, 11)] and clean(rig)
 
 
 def c_carddisk2048(b):
     """A: CMD_READ-only device with 2048-byte blocks."""
     disk = md.Disk(im.mbr_disk([(0, 0x0C, 64, 0x1000)], size=2048), bs=2048, profile='carddisk')
     rig = scan(b, disk)
-    return [(r['start'], r['count']) for r in rig.rows()] == [(64, 0x1000)] and clean(rig)
+    rows = [(r['start'], r['count'], r['dostype'], r['raw'][173]) for r in rig.rows()]
+    return rows == [(64, 0x1000, FAT, 11)] and clean(rig)
+
+
+def c_lseg2048(b):
+    """A: LSEG blocks of 2048 bytes carry SummedLongs-5 longs of payload each."""
+    payload = bytes((i * 7) & 0xFF for i in range(5000))
+    env = im.envec(2, 101, 0x50465303, size_block=512)
+    blocks = im.rdb_disk([('DH0', env, 1)], bs=2048, fs=(0x50465303, 0x00130002, payload, 512))
+    rig = scan(b, md.Disk(blocks, bs=2048))
+    entries = rig.fs_entries()
+    if len(entries) != 1:
+        return False
+    seg = entries[0][3] * 4                    # BPTR -> byte address of the next-segment long
+    got = bytes(rig.mem.r_block(seg + 4, len(payload)))
+    return got == payload and clean(rig)
+
+
+def c_rdb_other_bs(b):
+    """A: an RDB written for 512-byte blocks on a 2048-byte device is not walked."""
+    blocks = im.rdb_disk([('DH0', im.envec(2, 101, 0x444F5303), 1)])
+    blocks = {k: v.ljust(2048, b'\0') for k, v in blocks.items()}
+    rig = scan(b, md.Disk(blocks, bs=2048))
+    return rig.rows() == [] and clean(rig)
+
+
+def c_geometry_odd(b):
+    """A: an unsupported or failed geometry means 512-byte blocks, size unknown."""
+    out = []
+    for geo in (520, 'error'):
+        disk = md.Disk({0: im.fat_boot(total=0x20000)}, total=0x20000, geometry=geo)
+        rig = scan(b, disk)
+        out.append([(r['count'], r['raw'][173], r['dostype']) for r in rig.rows()] == [(0, 9, FAT)]
+                   and clean(rig))
+    return all(out)
+
+
+def c_envec4096(b):
+    """A: the synthesized envec of a 4096-byte device counts its blocks."""
+    disk = md.Disk({0: im.fat_boot(sector_size=4096, total=0x1000).ljust(4096, b'\0')},
+                   bs=4096, total=0x1000)
+    rig = scan(b, disk)
+    rows = rig.rows()
+    env = rows[0]['envec'] if rows else []
+    return (len(rows) == 1 and rows[0]['count'] == 0x1000 and env[1] == 1024
+            and env[13] == 0x1F000 and rows[0]['dostype'] == FAT and clean(rig))
 
 
 def c_blank(b):
@@ -308,8 +353,12 @@ CASES = [
     ('C2', 'unreadable block 0 keeps rows', c_unreadable_keeps),
     ('A', 'gpt 4096-byte device', c_gpt4k), ('A', 'rdb 2048-byte blocks', c_rdb2048),
     ('A', 'cmd-only 2048-byte device', c_carddisk2048),
+    ('A', 'lseg payload in 2048-byte blocks', c_lseg2048),
+    ('A', 'rdb of other block size skipped', c_rdb_other_bs),
+    ('A', 'odd or failed geometry', c_geometry_odd), ('A', 'envec of a 4096-byte device', c_envec4096),
     ('G', 'whole medium, no table, no bpb', c_foreign), (None, 'blank medium: one fat row', c_blank),
-    (None, 'ffs superfloppy row', c_amiga_flat), (None, 'superfloppy of unknown size', c_amiga_nosize), ('G', 'fat -S 4096 superfloppy', c_fat4096),
+    (None, 'ffs superfloppy row', c_amiga_flat), (None, 'superfloppy of unknown size', c_amiga_nosize),
+    ('G', 'fat -S 4096 superfloppy', c_fat4096),
     ('G1', 'boot code over the slot table', c_bootcode),
     ('C1', 'cmd_read past 4 GiB', c_cmd_high), ('C1', 'transient first read', c_first_fail),
     ('C2', 'part read error keeps rows', c_part_error), ('C3', 'no td_changestate', c_nochangestate),

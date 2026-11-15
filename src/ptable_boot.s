@@ -43,10 +43,10 @@ DOS_Delay	= -198
 ;   Only the fields actually read by the walkers below are
 ;   defined; *_ID / *_ChkSum / *_SummedLongs are referred to by
 ;   the RDSK/PART/FSHD/LSEG signature longs (RDSK_ID, ...).
-RDB_LOCATION_LIMIT = 16
-RDB_BLOCK_BYTES	= 512
+RDB_LOCATION_LIMIT = 16			;device blocks searched for RDSK
 
 rdb_SummedLongs	= 4
+rdb_BlockBytes	= 16
 rdb_PartitionList = 28
 rdb_FileSysHeaderList = 32
 
@@ -79,6 +79,7 @@ fhb_GlobalVec	= 76
 
 FSHD_ID		= $46534844		;'FSHD'
 
+lsb_SummedLongs	= 4
 lsb_Next	= 16
 lsb_LoadData	= 20
 
@@ -253,8 +254,10 @@ PTDEC	macro
 ;                                 (0 = FileSystem.resource only)
 ;     144    32   BC_Geometry     TD_GETGEOMETRY result
 ;     176     1   BC_ScanErr      a read failed during the scan's walk
-;     177     3   (pad to long)
-;     180   512   block buffer (BC_BlockBuf points here)
+;     177     1   BC_BlockShift   log2 of the device block size (9..12)
+;     178     2   (pad to long)
+;     180     4   BC_Medium       device blocks on the medium (0 = unknown)
+;     184  4096   block buffer (BC_BlockBuf points here)
 
 BC_ExecBase	= 0
 BC_ExpBase	= 4
@@ -278,9 +281,11 @@ BC_NodeHandler	= 140		;APTR resolved handler path C-string for the entry being
 				;mounted (0 = bind from FileSystem.resource only)
 BC_Geometry	= 144		;struct DriveGeometry from TD_GETGEOMETRY
 BC_ScanErr	= 176		;byte: a read failed during this scan's walk
-BC_Sizeof	= 180
+BC_BlockShift	= 177		;byte: log2 of the device block size, 9..12
+BC_Medium	= 180		;device blocks on the medium, 0 = unknown
+BC_Sizeof	= 184
 
-BC_BUF_BYTES	= 512
+BC_BUF_BYTES	= 4096		;the largest device block read
 
 ;--- DeviceNode blob layout (built by _actBuildBlob) ---
 DN_FSSM_OFF	= 44
@@ -695,24 +700,26 @@ _bgeo_clr:
 	rts
 
 ;===========================================================
-; _bootReadBlock: read one 512B block by 32-bit block#.
+; _bootReadBlock: read one device block into BC_BlockBuf.
 ;
-; Input:  d0 = block# (0..16M), a4 = &BootCtx
+; Input:  d0 = block number, a4 = &BootCtx (BC_BlockShift set)
 ; Output: d0 = 0 on success, nonzero (IO_Error) otherwise
 ;
-; Wraps _bootReadBytes64 so reads survive partition starts
-; that wrap past 4 GiB in 32-bit IO_Offset.
+; The byte offset is 64 bits wide, so blocks past 4 GiB read.
 ;===========================================================
 _bootReadBlock:
-	movem.l	d1-d2/a1,-(sp)
-	moveq.l	#0,d1			;high32 = 0 (block# always small)
-	add.l	d0,d0			;*2 via add.l (faster than lsl.l #1)
-	lsl.l	#8,d0			;d0 = block * 512 (low32)
-	exg	d0,d1			;d0=high32=0, d1=low32
-	move.l	#RDB_BLOCK_BYTES,d2
+	movem.l	d1-d3/a1,-(sp)
+	moveq.l	#0,d3
+	move.b	BC_BlockShift(a4),d3
+	move.l	d0,d1
+	lsl.l	d3,d1			;d1 = low32 of the byte offset
+	rol.l	d3,d0
+	eor.l	d1,d0			;d0 = high32: the bits rotated out
+	moveq.l	#1,d2
+	lsl.l	d3,d2			;d2 = block size
 	move.l	BC_BlockBuf(a4),a1
 	bsr	_bootReadBytes64
-	movem.l	(sp)+,d1-d2/a1
+	movem.l	(sp)+,d1-d3/a1
 	rts
 
 ;===========================================================
@@ -817,10 +824,10 @@ _brt_far:
 	rts
 
 ;-- _brb_scsi10: HD_SCSICMD READ(10). a0 = IOReq, d3=hi d4=lo (byte
-;   offset), d5=len, a3=dest, a6=ExecBase. SCSICmd + 10-byte CDB on stack.
-;   Preserves d3-d5/a0/a3 (caller's working values); clobbers d0-d1/a1-a2.
+;   offset), d5=len, a3=dest, a4=ctx, a6=ExecBase. SCSICmd + 10-byte CDB on
+;   stack. Preserves d3-d5/a0/a3 (caller's working values).
 _brb_scsi10:
-	movem.l	d0-d1/a1-a2,-(sp)
+	movem.l	d0-d2/a1-a2,-(sp)
 	lea	-48(sp),sp		;scratch: SCSICmd(30) + CDB(10) + pad
 	move.l	sp,a2			;a2 = SCSICmd
 	lea	scsi_Sizeof(a2),a1	;a1 = CDB (after the struct)
@@ -834,19 +841,18 @@ _brb_scsi10:
 	move.l	d0,20(a2)
 	move.l	d0,24(a2)
 	move.l	d0,28(a2)
-;-- LBA = byte offset >> 9 (block-aligned); 32-bit reach is plenty
+;-- LBA = byte offset >> BlockShift (block-aligned); high32 below the block
+;   size keeps the LBA within the 32 bits READ(10) carries
+	moveq.l	#0,d2
+	move.b	BC_BlockShift(a4),d2
 	move.l	d4,d0
-	lsr.l	#8,d0
-	lsr.l	#1,d0			;d0 = low32 >> 9
+	lsr.l	d2,d0			;d0 = low32 >> shift
 	move.l	d3,d1
-	lsl.l	#8,d1
-	lsl.l	#8,d1
-	lsl.l	#7,d1			;d1 = high32 << 23
+	ror.l	d2,d1			;d1 = high32 << (32 - shift)
 	or.l	d1,d0			;d0 = LBA (blocks)
 ;-- length in blocks
 	move.l	d5,d1
-	lsr.l	#8,d1
-	lsr.l	#1,d1			;d1 = len >> 9
+	lsr.l	d2,d1
 ;-- build the CDB
 	move.b	#$28,(a1)		;READ(10)
 	clr.b	1(a1)
@@ -875,13 +881,14 @@ _brb_scsi10:
 	move.l	a0,a1
 	jsr	DoIO(a6)
 	lea	48(sp),sp		;free scratch
-	movem.l	(sp)+,d0-d1/a1-a2
+	movem.l	(sp)+,d0-d2/a1-a2
 	rts
 
 ;===========================================================
-; _bootBlockOK: RDB block sanity. SummedLongs lies within d1..128 and the
-; first SummedLongs longs of the block add up to zero.
-; In : a0 = block, d1 = fewest summed longs the caller relies on (>= 1)
+; _bootBlockOK: RDB block sanity. SummedLongs lies within d1 and the longs
+; of one device block, and the first SummedLongs longs add up to zero.
+; In : a0 = block, d1 = fewest summed longs the caller relies on (>= 1),
+;      a4 = &BootCtx (BC_BlockShift)
 ; Out: d0 = 0 and Z set when valid
 ;===========================================================
 _bootBlockOK:
@@ -889,7 +896,12 @@ _bootBlockOK:
 	move.l	4(a0),d2		;SummedLongs
 	cmp.l	d1,d2
 	blo.s	_bbo_bad
-	cmp.l	#RDB_BLOCK_BYTES/4,d2
+	moveq.l	#0,d0
+	move.b	BC_BlockShift(a4),d0
+	subq.l	#2,d0
+	moveq.l	#1,d1
+	lsl.l	d0,d1			;d1 = longs per block
+	cmp.l	d1,d2
 	bhi.s	_bbo_bad
 	move.l	a0,a2
 	moveq.l	#0,d0
@@ -1572,22 +1584,28 @@ _bdd_done:
 	rts
 
 ;-- Print " (<dostype>, <MB> MB)" + LF for the PartEntry in a3.
-;   MB = pe_BlockCount >> 11 (512-byte sectors -> MiB).
+;   MB = pe_BlockCount >> (20 - block shift); shift 0 means 9 (512 bytes).
 _bootDebugPartTail:
-	movem.l	d0/a0,-(sp)
+	movem.l	d0-d1/a0,-(sp)
 	lea	s_pt_lparen(pc),a0
 	bsr	_bootDebug
 	move.l	pe_DosType(a3),d0
 	bsr	_bootDebugDosType
 	lea	s_pt_comma(pc),a0
 	bsr	_bootDebug
+	moveq.l	#0,d1
+	move.b	pe_BlockShift(a3),d1
+	bne.s	_bdpt_shift
+	moveq.l	#9,d1
+_bdpt_shift:
+	neg.l	d1
+	add.l	#20,d1
 	move.l	pe_BlockCount(a3),d0
-	lsr.l	#8,d0
-	lsr.l	#3,d0
+	lsr.l	d1,d0
 	bsr	_bootDebugDec32
 	lea	s_pt_mbnl(pc),a0
 	bsr	_bootDebug
-	movem.l	(sp)+,d0/a0
+	movem.l	(sp)+,d0-d1/a0
 	rts
 
 s_pt_lparen:	dc.b	" (",0

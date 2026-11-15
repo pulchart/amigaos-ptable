@@ -91,6 +91,14 @@ or without a FAT boot block or @{fg shine}$55AA@{fg text} , gives @{fg shine}FAT
 node; the handler reads block 0 and decides. Block 0 is an MBR only when
 every slot status byte is @{fg shine}$00@{fg text} or @{fg shine}$80@{fg text} and a slot has a type.
 
+@{b}Block size.@{ub} The scan asks the device for its block size ( @{fg shine}TD_GETGEOMETRY@{fg text}
+) and reads whole blocks of 512, 1024, 2048 or 4096 bytes; a device that
+reports no size or another one is read in 512-byte blocks. Start and
+size are published in the device's blocks, and @{fg shine}pe_BlockShift@{fg text} (layout 6)
+records the size. An RDB whose @{fg shine}rdb_BlockBytes@{fg text} differs from the device's
+block size is not walked and the medium gets no row; a LoadSeg block
+carries its @{fg shine}SummedLongs@{fg text} minus five longs of filesystem code.
+
 Registering a partition needs a handler for its filesystem already in
 @{fg shine}FileSystem.resource@{fg text} . FAT partitions match any registered @{fg shine}FAT\x@{fg text} handler,
 every other filesystem must match its DosType exactly. With no handler
@@ -737,7 +745,7 @@ Notes a consumer needs:
 @{b}@{fg shine}partition.resource@{fg text} layout.@{ub} Readers walk @{fg shine}ptr_PartList@{fg text} under @{fg shine}Forbid()@{fg text} or
 take @{fg shine}ptr_Lock@{fg text} . @{fg shine}OpenResource@{fg text} cannot negotiate versions, so the only
 runtime layout signal is the pair of stamps in the header, @{fg shine}ptr_Layout@{fg text}
-(currently @{fg shine}PTR_LAYOUT_V = 5@{fg text} ) and @{fg shine}ptr_EntrySize@{fg text} , plus @{fg shine}pe_Length@{fg text} per
+(currently @{fg shine}PTR_LAYOUT_V = 6@{fg text} ) and @{fg shine}ptr_EntrySize@{fg text} , plus @{fg shine}pe_Length@{fg text} per
 entry. Fields are appended only, never inserted, because @{fg shine}lsptres@{fg text} and
 fat95 ship separately-built offset mirrors; a consumer that needs a
 newer field checks the stamp and degrades if it is older. The full field
