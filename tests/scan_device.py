@@ -18,7 +18,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds
 
-OPEN = {'A', 'C1', 'C2', 'E4', 'I', 'J-ee', 'J-max', 'J-gpt'}
+OPEN = {'A', 'E4', 'I', 'J-ee', 'J-max', 'J-gpt'}
 
 FAT = 0x46415400
 PES_MBR, PES_GPT, PES_RDB, PES_FLAT = 0, 1, 2, 3
@@ -78,6 +78,34 @@ def c_rescan(b):
     first = rig.rows()
     rig.scan()
     return len(first) == 1 and [r['addr'] for r in rig.rows()] == [first[0]['addr']] and clean(rig)
+
+
+def c_swap_purge(b):
+    """A rescan of a different medium frees the rows it no longer has."""
+    for build_blocks in (lambda n: im.mbr_disk([(0, 0x0C, 2048 + i * 0x9000, 0x8000)
+                                                 for i in range(n)]),
+                         lambda n: im.gpt_disk([(im.MS_BASIC, 2048 + i * 0x9000, 0x9FFF + i * 0x9000)
+                                                for i in range(n)])):
+        disk = md.Disk(build_blocks(3))
+        rig = scan(b, disk)
+        if len(rig.rows()) != 3:
+            return False
+        disk.blocks = build_blocks(1)
+        rig.scan()
+        if len(rig.rows()) != 1 or not clean(rig):
+            return False
+    return True
+
+
+def c_unreadable_keeps(b):
+    """An unreadable block 0 leaves the published rows as they are."""
+    disk = md.Disk(im.mbr_disk([(0, 0x0C, 2048, 0x8000), (0, 0x0C, 0x9000, 0x4000)]))
+    rig = scan(b, disk)
+    before = [(r['name'], r['flags']) for r in rig.rows()]
+    for cmd in (md.NSCMD_TD_READ64, md.TD_READ64, md.HD_SCSICMD, md.CMD_READ):
+        disk.inject[(cmd, 0)] = md.TDERR_NOTSPECIFIED
+    rig.scan()
+    return len(before) == 2 and [(r['name'], r['flags']) for r in rig.rows()] == before and clean(rig)
 
 
 # -- audit cases -------------------------------------------------------------
@@ -181,7 +209,8 @@ def c_part_error(b):
     disk = md.Disk(blocks)
     rig = scan(b, disk)
     before = [r['name'] for r in rig.rows()]
-    disk.inject[(md.NSCMD_TD_READ64, 2)] = md.TDERR_NOTSPECIFIED
+    for cmd in (md.NSCMD_TD_READ64, md.TD_READ64, md.HD_SCSICMD, md.CMD_READ):
+        disk.inject[(cmd, 2)] = md.TDERR_NOTSPECIFIED
     rig.scan()
     after = [r['name'] for r in rig.rows()]
     return before == ['DH0', 'DH1', 'DH2'] and after == before and clean(rig)
@@ -251,7 +280,8 @@ def c_gpt_reads(b):
 CASES = [
     (None, 'mbr 512', c_mbr512), (None, 'gpt 512', c_gpt512), (None, 'rdb 512', c_rdb512),
     (None, 'superfloppy 512', c_flat512), (None, 'linux-only mbr', c_linux83),
-    (None, 'rescan reuses rows', c_rescan),
+    (None, 'rescan reuses rows', c_rescan), (None, 'swap frees rows', c_swap_purge),
+    ('C2', 'unreadable block 0 keeps rows', c_unreadable_keeps),
     ('A', 'gpt 4096-byte device', c_gpt4k), ('A', 'rdb 2048-byte blocks', c_rdb2048),
     ('A', 'cmd-only 2048-byte device', c_carddisk2048),
     ('G', 'whole medium, no table, no bpb', c_foreign), (None, 'blank medium: one fat row', c_blank),
