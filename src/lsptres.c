@@ -62,7 +62,7 @@ struct PartResource {
     UWORD                  pr_EntrySize;  /* 96  publisher's pe_Sizeof */
 };                                        /* 98 */
 
-#define PTR_LAYOUT_KNOWN 5  /* highest layout this tool understands */
+#define PTR_LAYOUT_KNOWN 6  /* highest layout this tool understands */
 
 /* PartEntry (ptable_pub.i; layout = PTR_LAYOUT_KNOWN) */
 struct PartEntry {
@@ -82,7 +82,7 @@ struct PartEntry {
     UBYTE        pe_NameB[32];   /* 56  (BSTR) */
     ULONG        pe_Envec[21];   /* 88 */
     UBYTE        pe_ReadMode;    /* 172 */
-    UBYTE        pe_pad;         /* 173 */
+    UBYTE        pe_BlockShift;  /* 173 layout 6: log2 bytes per block, 0 = 512 */
     UBYTE        pe_MountName[32];/* 174 (BSTR) */
     UBYTE        pe_pad2[2];     /* 206 (pad to pe_MountFlags) */
     ULONG        pe_MountFlags;  /* 208 */
@@ -146,6 +146,8 @@ static const char *ctrl_str(const struct PartEntry *pe)
 
 /* publisher layout is 4 or newer: PEF_KEEPSTATIC is meaningful */
 static int g_layout4;
+/* publisher layout is 6 or newer: pe_BlockShift is meaningful */
+static int g_layout6;
 
 /* 5-char flag picture. First char is three-valued: P present, I invalid
    (a card is in but it has no partition for this mounted slot), - absent.
@@ -293,12 +295,14 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                ctrl_str(pe));
         if (verbose) {
             /* MiB, falling back to kiB below one: an 880K DD floppy used
-             * to read as 0M. Both units are binary, a block being 512 bytes,
-             * and kiB only appears under 1024 so the field stays five wide. */
-            unsigned long size = (unsigned long)(pe->pe_BlockCount / 2048);
+             * to read as 0M. Both units are binary, and kiB only appears
+             * under 1024 so the field stays five wide. Blocks are 512 bytes
+             * unless a layout 6 publisher says otherwise. */
+            int shift = (g_layout6 && pe->pe_BlockShift) ? pe->pe_BlockShift : 9;
+            unsigned long size = (unsigned long)(pe->pe_BlockCount >> (20 - shift));
             char unit = 'M';
             if (size == 0) {
-                size = (unsigned long)(pe->pe_BlockCount / 2);
+                size = (unsigned long)((pe->pe_BlockCount << shift) >> 10);
                 unit = 'K';
             }
             pout(" %-5s %10lu %11lu %5lu%c",
@@ -354,11 +358,11 @@ static int run(void)
      * (struct Library lib_PosSize at offset 18; header grew 94 -> 98) */
     {
         UWORD possize = *(UWORD *)((UBYTE *)res + 18);
-        if (possize >= 98 && res->pr_Layout >= 3)
-            have_nodedt = 1;
-        if (possize >= 98 && res->pr_Layout >= 4)
-            g_layout4 = 1;
-        if (possize >= 98 && res->pr_Layout > PTR_LAYOUT_KNOWN)
+        UWORD layout = possize >= 98 ? res->pr_Layout : 0;
+        have_nodedt = layout >= 3;
+        g_layout4 = layout >= 4;
+        g_layout6 = layout >= 6;
+        if (layout > PTR_LAYOUT_KNOWN)
             pout("note: resource layout v%u is newer than this tool (v%u); "
                    "appended fields are not shown\n",
                    res->pr_Layout, PTR_LAYOUT_KNOWN);

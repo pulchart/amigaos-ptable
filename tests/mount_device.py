@@ -162,6 +162,19 @@ def c_static_overlap(b):
     return names == ['DH0', 'PFSCF'] and node == static and bool(dh1['flags'] & 8) and clean(rig)
 
 
+def c_static_overlap_4k(b):
+    """F2: on a 4096-byte device the hand mount's window is compared in the
+    same units as the row."""
+    rig = rig_for(b, im.mbr_disk([(0, 0x0C, 256, 0x1000)], size=4096), bs=4096, total=0x10000)
+    with_fat_handler(rig)
+    # 512-byte envec blocks: blocks 2048..34815 are device blocks 256..4351
+    static = rig.add_static_node('HAND', 'test.device', 0, 2048, 34815, 0x4D534400)
+    rig.scan()
+    rig.mount()
+    row = rig.rows()[0]
+    return adds(rig) == [] and rig.mem.r32(row['addr'] + rig.eq['pe_DevNode']) == static and clean(rig)
+
+
 def c_static_elsewhere(b):
     """F2: hand-mounted nodes on another unit, past the partition, on
     auto-detect, or with a port-handler startup leave the mount alone."""
@@ -244,6 +257,7 @@ CASES = [
     ('E1', 'newer rdb filesystem loaded', c_fshd_newer),
     ('F2', 'static node over a partition', c_static_overlap),
     (None, 'unrelated hand mounts ignored', c_static_elsewhere),
+    (None, 'hand mount over a 4096-byte row', c_static_overlap_4k),
     (None, 'mount_used builds over a hand mount', c_static_mountused),
     (None, 'same-named fat node reused', c_reuse_fat),
     ('F1', 'same-named other fs not reused', c_reuse_fat_only),
