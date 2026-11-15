@@ -524,6 +524,8 @@ _amo_noused:
 	bne.w	_amo_next
 _amo_stamped:
 	move.b	pe_Flags(a3),d3
+	btst	#PEB_PRESENT,d3		;absent: the medium does not have it now
+	beq.w	_amo_next
 	btst	#PEB_NOMOUNT,d3
 	bne.w	_amo_next
 	btst	#PEB_MOUNTED,d3
