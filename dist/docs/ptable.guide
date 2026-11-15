@@ -180,51 +180,62 @@ are published only.
 
 @{b}Hotplug attach (DOS time).@{ub} A card insert wakes the consumer's mount
 worker, which publishes then mounts the card's partitions.
+@{fg shine}MountPartitions@{fg text} takes each handler from the consumer's MountCfg rows (
+@{fg shine}HANDLER_<fs>@{fg text} and the other @{fg shine}cfd.prefs@{fg text} keys) and leaves blocks a hand
+mount already serves to that mount.
 
 @{fg highlight}
-  +--------------------+
-  |    card insert     |
-  +--------------------+
-             |          
-             |          
-             |          
-             |          
-             v          
-  +--------------------+
-  |  mount-agent task  |
-  +--------------------+
-             |          
-             |          
-             |          
-             |          
-             v          
-  +--------------------+
-  |mount-worker process|
-  +--------------------+
-             |          
-             |          
-             |          
-             |          
-             v          
-  +--------------------+
-  |   ScanPartitions   |
-  +--------------------+
-             |          
-             |          
-             |          
-             |          
-             v          
-  +--------------------+
-  |  MountPartitions   |
-  +--------------------+
-             |          
-             |          
-             |          
-             |          
-             v          
-  +--------------------+
-  | partition.resource |
-  +--------------------+
+  +--------------------------+
+  |       card insert        |
+  +--------------------------+
+                |             
+                |             
+                |             
+                |             
+                v             
+  +--------------------------+
+  |     mount-agent task     |
+  +--------------------------+
+                |             
+                |             
+                |             
+                |             
+                v             
+  +--------------------------+
+  |   mount-worker process   |
+  +--------------------------+
+                |             
+                |             
+                |             
+                |             
+                v             
+  +--------------------------+
+  |      ScanPartitions      |
+  +--------------------------+
+                |             
+                |             
+                |             
+                |             
+                v             
+  +--------------------------+
+  |     MountPartitions      |
+  +--------------------------+
+                |             
+                |             
+                |             
+                |             
+                v             
+  +--------------------------+
+  |handler from MountCfg rows|
+  +--------------------------+
+                |             
+                |             
+                |             
+                |             
+                v             
+  +--------------------------+
+  |    partition.resource    |
+  +--------------------------+
 @{fg text}
 
 @{b}Hotplug detach (card removed).@{ub} Two policies (see @{"Configuration" link configuration} ): keep the handler or
@@ -262,52 +273,62 @@ tear it down.
 
 @{b}Handler mount, auto-detect (e.g. fat95).@{ub} A handler probes a card, lets
 @{fg shine}ScanPartitions@{fg text} publish the candidates, picks its partition, and overlays
-its real DOS name with @{fg shine}RegisterPartition@{fg text} .
+its real DOS name with @{fg shine}RegisterPartition@{fg text} . It records the filesystem of
+the volume it finds with @{fg shine}SetPartitionFs@{fg text} , e.g. @{fg shine}FAT32@{fg text} , and an accepted
+@{fg shine}ACTION_DIE@{fg text} clears its entry with @{fg shine}UnregisterPartition@{fg text} .
 
 @{fg highlight}
-  +---------------------------------------+
-  |               mount MS:               |
-  +---------------------------------------+
-                      |                    
-                      |                    
-                      |                    
-                      |                    
-                      v                    
-  +---------------------------------------+
-  |             fat95 handler             |
-  +---------------------------------------+
-                      |                    
-                      |                    
-                      |                    
-                      |                    
-                      v                    
-  +---------------------------------------+
-  |             ScanPartitions            |
-  +---------------------------------------+
-                      |                    
-                      |                    
-                      |                    
-                      |                    
-                      v                    
-  +---------------------------------------+
-  |          select FAT partition         |
-  +---------------------------------------+
-                      |                    
-                      |                    
-                      |                    
-                      |                    
-                      v                    
-  +---------------------------------------+
-  |           RegisterPartition           |
-  +---------------------------------------+
-                      |                    
-                      |                    
-                      |                    
-                      |                    
-                      v                    
-  +---------------------------------------+
-  |partition.resource: real name + MOUNTED|
-  +---------------------------------------+
+  +---------------------------------------------+
+  |                  mount MS:                  |
+  +---------------------------------------------+
+                         |                       
+                         |                       
+                         |                       
+                         |                       
+                         v                       
+  +---------------------------------------------+
+  |                fat95 handler                |
+  +---------------------------------------------+
+                         |                       
+                         |                       
+                         |                       
+                         |                       
+                         v                       
+  +---------------------------------------------+
+  |                ScanPartitions               |
+  +---------------------------------------------+
+                         |                       
+                         |                       
+                         |                       
+                         |                       
+                         v                       
+  +---------------------------------------------+
+  |             select FAT partition            |
+  +---------------------------------------------+
+                         |                       
+                         |                       
+                         |                       
+                         |                       
+                         v                       
+  +---------------------------------------------+
+  |              RegisterPartition              |
+  +---------------------------------------------+
+                         |                       
+                         |                       
+                         |                       
+                         |                       
+                         v                       
+  +---------------------------------------------+
+  |         volume found: SetPartitionFs        |
+  +---------------------------------------------+
+                         |                       
+                         |                       
+                         |                       
+                         |                       
+                         v                       
+  +---------------------------------------------+
+  |partition.resource: name + MOUNTED + FAT type|
+  +---------------------------------------------+
 @{fg text}
 
 ----------------------------------------
@@ -335,7 +356,7 @@ synthesizes one: @{fg shine}PREFIX@{fg text} + unit-letter + partition-number.
     partitions from 4 whichever slot holds the extended partition (only one is
     read), GPT entry number. A slot that is empty, not FAT, or holds the extended
     partition gets no name: its number is skipped, so the first logical is always
-    @{fg shine}CF4@{fg text} . Indexes stop at 99, and a card publishes at most 12 MBR or GPT
+    @{fg shine}CF4@{fg text} . Indexes stop at 99, so a card publishes at most 100 MBR or GPT
     partitions.
 
   @{b}MBR slot@{ub}   @{b}Content@{ub}               @{b}Name@{ub}      
