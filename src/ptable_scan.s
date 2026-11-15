@@ -886,8 +886,7 @@ _scanFillEnvec:
 ; In : a4 = &BootCtx, a5 = ExecBase; PTR_Lock held
 ;===========================================================
 _scanClearPresent:
-	movem.l	d3/a2-a3/a6,-(sp)
-	move.l	BC_Unit(a4),d3
+	movem.l	a2-a3/a6,-(sp)
 	bsr	_partGetResource
 	tst.l	d0
 	beq.s	_scp_out
@@ -897,11 +896,7 @@ _scanClearPresent:
 _scp_walk:
 	move.l	(a3),d0
 	beq.s	_scp_out
-	cmp.l	pe_Unit(a3),d3
-	bne.s	_scp_next
-	move.l	pe_Device(a3),a0
-	move.l	BC_DevName(a4),a1
-	bsr	_psStrEq
+	bsr	_actMatch
 	tst.l	d0
 	beq.s	_scp_next
 	bclr	#PEB_PRESENT,pe_Flags(a3)
@@ -909,7 +904,7 @@ _scp_next:
 	move.l	(a3),a3
 	bra.s	_scp_walk
 _scp_out:
-	movem.l	(sp)+,d3/a2-a3/a6
+	movem.l	(sp)+,a2-a3/a6
 	rts
 
 ;===========================================================
@@ -974,9 +969,8 @@ _spg_out:
 ; Out: d0 = entry, or 0 for a new one; clobbers d1
 ;===========================================================
 _scanFindRDB:
-	movem.l	d2-d3/a0-a1/a3,-(sp)
+	movem.l	d3/a0-a1/a3,-(sp)
 	moveq.l	#0,d3			;d3 = unmounted entry to fall back on
-	move.l	BC_Unit(a4),d2
 	bsr	_partGetResource
 	tst.l	d0
 	beq.s	_sfr_out
@@ -985,15 +979,11 @@ _scanFindRDB:
 _sfr_walk:
 	tst.l	(a3)
 	beq.s	_sfr_end
-	cmp.l	pe_Unit(a3),d2
-	bne.s	_sfr_next
 	cmp.l	pe_StartLBA(a3),d6
 	bne.s	_sfr_next
 	cmp.b	#PES_RDB,pe_Source(a3)
 	bne.s	_sfr_next
-	move.l	pe_Device(a3),a0
-	move.l	BC_DevName(a4),a1
-	bsr	_psStrEq
+	bsr	_actMatch
 	tst.l	d0
 	beq.s	_sfr_next
 	lea	pe_Envec(a3),a0
@@ -1025,7 +1015,7 @@ _sfr_next:
 _sfr_end:
 	move.l	d3,d0
 _sfr_out:
-	movem.l	(sp)+,d2-d3/a0-a1/a3
+	movem.l	(sp)+,d3/a0-a1/a3
 	rts
 ;-- _sfr_cmp: envec long at offset d0 equal in a0 and a1, else leave
 ;   through _sfr_differs
@@ -1050,10 +1040,9 @@ _sfr_cmp:
 ; Out: d0 = matching PartEntry, or 0 if none; clobbers d1/a0/a1
 ;===========================================================
 _scanFindByIndex:
-	movem.l	d2-d6/a2-a3,-(sp)
+	movem.l	d4/d6/a2-a3,-(sp)
 	move.l	d0,d4			;d4 = partition index
 	moveq.l	#0,d6			;d6 = unmounted entry to fall back on
-	move.l	BC_Unit(a4),d5
 	bsr	_partGetResource
 	tst.l	d0
 	beq.s	_sfb_end
@@ -1063,8 +1052,6 @@ _scanFindByIndex:
 _sfb_walk:
 	move.l	(a3),d0
 	beq.s	_sfb_end
-	cmp.l	pe_Unit(a3),d5
-	bne.s	_sfb_next
 	cmp.l	pe_PartIndex(a3),d4
 	bne.s	_sfb_next
 ;-- an RDB entry is refreshed only by the RDB publisher, or a card swap that
@@ -1072,9 +1059,7 @@ _sfb_walk:
 ;   place instead of leaving it to the purge (kept as MOUNTED+INVALID)
 	cmp.b	#PES_RDB,pe_Source(a3)
 	beq.s	_sfb_next
-	move.l	pe_Device(a3),a0
-	move.l	BC_DevName(a4),a1
-	bsr	_psStrEq
+	bsr	_actMatch
 	tst.l	d0
 	beq.s	_sfb_next
 	btst	#PEB_MOUNTED,pe_Flags(a3)
@@ -1097,9 +1082,9 @@ _sfb_next:
 	bra.s	_sfb_walk
 _sfb_yes:
 	move.l	a3,d0			;return the matching entry
-	movem.l	(sp)+,d2-d6/a2-a3
+	movem.l	(sp)+,d4/d6/a2-a3
 	rts
 _sfb_end:
 	move.l	d6,d0
-	movem.l	(sp)+,d2-d6/a2-a3
+	movem.l	(sp)+,d4/d6/a2-a3
 	rts
