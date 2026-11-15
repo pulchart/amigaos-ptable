@@ -18,7 +18,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds
 
-OPEN = {'A', 'I'}
+OPEN = {'A'}
 
 FAT = 0x46415400
 PES_MBR, PES_GPT, PES_RDB, PES_FLAT = 0, 1, 2, 3
@@ -294,6 +294,13 @@ def c_gpt_reads(b):
     return len(rig.rows()) == 4 and len(reads) == 2 and clean(rig)
 
 
+def c_rdb_count_cut(b):
+    """I: an RDB partition reaching past block $FFFFFFFF is cut there."""
+    env = im.envec(1000, 0x7FFFFFFF, 0x444F5303, surfaces=1, bpt=64)
+    rig = scan(b, md.Disk(im.rdb_disk([('DH0', env, 1)])))
+    return [(r['start'], r['count']) for r in rig.rows()] == [(64000, 0xFFFFFFFF - 64000)] and clean(rig)
+
+
 CASES = [
     (None, 'mbr 512', c_mbr512), (None, 'gpt 512', c_gpt512), (None, 'rdb 512', c_rdb512),
     (None, 'superfloppy 512', c_flat512), (None, 'linux-only mbr', c_linux83),
@@ -308,7 +315,7 @@ CASES = [
     ('C2', 'part read error keeps rows', c_part_error), ('C3', 'no td_changestate', c_nochangestate),
     ('C4', 'open before lock', c_lock_order), ('E4', 'torn part block', c_torn_part),
     ('E4', 'torn lseg block', c_torn_lseg),
-    ('I', 'rdb start overflow', c_rdb_overflow), ('J-ee', 'protective entry in slot 1', c_ee_slot1),
+    ('I', 'rdb start overflow', c_rdb_overflow), ('I', 'rdb count cut at 32 bits', c_rdb_count_cut), ('J-ee', 'protective entry in slot 1', c_ee_slot1),
     ('J-max', 'more than 12 logicals', c_max_rec), ('J-gpt', 'gpt entry block read once', c_gpt_reads),
 ]
 

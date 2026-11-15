@@ -100,6 +100,16 @@ def cases(build):
         got = r.run()
         out.append(('size unknown keeps the auto-detect node', got['nodedt'], MARKER))
 
+        r.row(PES_MBR, FAT, 0xFFFFF800 + 1)   # start 2048: last block past 32 bits
+        r.cfg(node_dostype=FAT | 1)
+        got = r.run()
+        out.append(('window past 32 bits keeps the auto-detect node', got['nodedt'], MARKER))
+
+        r.row(PES_MBR, FAT, 0xFFFFF800)       # last block $FFFFFFFF
+        r.cfg(node_dostype=FAT | 1)
+        got = r.run()
+        out.append(('window ending at block $FFFFFFFF is set', got['nodedt'], FAT | 1))
+
         r.row(PES_RDB, DOS3, 0x8000, envec_dostype=DOS3)
         r.cfg(node_dostype=FAT | 1, handler='L:fat95')
         got = r.run()
