@@ -11,7 +11,7 @@ from pathlib import Path
 TESTS = Path(__file__).resolve().parent
 INVENTORY = TESTS / 'INVENTORY.md'
 BEGIN, END = '<!-- TESTS:BEGIN -->', '<!-- TESTS:END -->'
-TOOLING = ('toolchain.py', 'deps.py', 'list_tests.py')
+TOOLING = ('toolchain.py', 'deps.py', 'list_tests.py', 'mockexec.py', 'mockdev.py', 'images.py')
 
 
 def cell(text):
