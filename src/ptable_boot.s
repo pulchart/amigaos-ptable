@@ -591,7 +591,8 @@ _bou_sig_ok:
 _bou_od_ok:
 	move.b	#1,BC_DevOpen(a4)
 
-;-- poll TD_CHANGESTATE up to 5s for slow card spin-up
+;-- poll TD_CHANGESTATE up to 5s for slow card spin-up. A driver that fails
+;   the command reports nothing about the medium: the reads decide.
 	moveq.l	#50,d7
 _bou_poll:
 	lea	BC_DevIOReq(a4),a1
@@ -600,10 +601,9 @@ _bou_poll:
 	clr.b	IO_Error(a1)
 	jsr	DoIO(a6)
 	tst.b	BC_DevIOReq+IO_Error(a4)
-	bne.s	_bou_delay
+	bne.s	_bou_ok
 	move.l	BC_DevIOReq+IO_Actual(a4),d0
 	beq.s	_bou_ok			;IO_Actual=0 -> media present
-_bou_delay:
 	bsr	_bootDelay100ms
 	subq.w	#1,d7
 	bne.s	_bou_poll
