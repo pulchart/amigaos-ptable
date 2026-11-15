@@ -50,6 +50,8 @@ dbg_pt_die_no:
 	dc.b	"[PT] ACTION_DIE declined, code ",0
 dbg_pt_mounted:
 	dc.b	"[PT] mounted ",0
+dbg_pt_served:
+	dc.b	"[PT] served by hand mount ",0
 dbg_pt_reuse:
 	dc.b	"[PT] reusing handler ",0
 dbg_pt_unmounted:

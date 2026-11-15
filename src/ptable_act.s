@@ -335,6 +335,172 @@ _arc_nstore:
 	rts
 
 ;===========================================================
+; _actFindStatic: a DeviceNode on the DOS list for this device+unit whose
+; block window overlaps the entry's blocks, and that no row records yet.
+; Auto-detect FAT nodes (de_LowCyl = 0) are skipped: the name reuse in
+; _actMount owns them. dn_Startup is handler specific, so every pointer is
+; checked with TypeOfMem before it is read.
+; In : a3 = entry, a4 = &BootCtx, a5 = ExecBase
+; Out: d0 = DeviceNode or 0
+;===========================================================
+_actFindStatic:
+	movem.l	d1-d7/a0-a2/a6,-(sp)
+	move.l	pe_StartLBA(a3),d4	;d4 = first block of the entry
+	move.l	pe_BlockCount(a3),d5
+	beq.s	_afs_last
+	subq.l	#1,d5
+_afs_last:
+	add.l	d4,d5			;d5 = last block
+	bcc.s	_afs_lok
+	moveq.l	#-1,d5
+_afs_lok:
+	move.l	a5,a6
+	jsr	Forbid(a6)
+	lea	378(a6),a0		;ExecBase LibList
+	lea	DosName(pc),a1
+	jsr	FindName(a6)
+	tst.l	d0
+	beq.w	_afs_none
+	move.l	d0,a0
+	move.l	34(a0),d0		;dl_Root
+	beq.w	_afs_none
+	move.l	d0,a0
+	move.l	24(a0),d0		;rn_Info (BPTR DosInfo)
+	beq.w	_afs_none
+	lsl.l	#2,d0
+	move.l	d0,a0
+	move.l	4(a0),d7		;di_DevInfo (BPTR)
+_afs_walk:
+	tst.l	d7
+	beq.w	_afs_none
+	lsl.l	#2,d7
+	move.l	d7,a2			;a2 = DosList node
+	move.l	(a2),d7			;dol_Next for the next round
+	tst.l	4(a2)			;dol_Type: DLT_DEVICE = 0
+	bne.s	_afs_walk
+	move.l	28(a2),d0		;dn_Startup
+	bsr	_afsMem			;a1 = FSSM
+	beq.s	_afs_walk
+	move.l	BC_Unit(a4),d0
+	cmp.l	(a1),d0			;fssm_Unit
+	bne.s	_afs_walk
+	move.l	a1,d6			;d6 = FSSM
+	move.l	4(a1),d0		;fssm_Device
+	bsr	_afsMem
+	beq.s	_afs_walk
+	move.l	a1,a0
+	move.l	a2,-(sp)
+	move.l	BC_DevNameBSTR(a4),d0
+	lsl.l	#2,d0
+	move.l	d0,a2
+	bsr	_bootBStrEqualCI	;Z = same device
+	move.l	(sp)+,a2
+	bne.s	_afs_walk
+	move.l	d6,a1
+	move.l	8(a1),d0		;fssm_Environ
+	bsr	_afsMem			;a1 = envec
+	beq.s	_afs_walk
+	cmp.l	#DE_HighCyl,(a1)	;TableSize must reach HighCyl
+	blo.s	_afs_walk
+	tst.l	DE_LowCyl*4(a1)
+	bne.s	_afs_fixed
+	cmp.l	#DE_DOSTYPE,(a1)
+	blo.s	_afs_fixed
+	move.l	DE_DOSTYPE*4(a1),d0
+	clr.b	d0
+	cmp.l	#DOSTYPE_FAT,d0
+	beq.s	_afs_walk		;auto-detect FAT node
+_afs_fixed:
+;-- recorded by a row already: ours, or registered by its handler
+	move.l	a1,-(sp)
+	move.l	a2,d0
+	bsr	_afsRecorded
+	movem.l	(sp)+,a1		;movem keeps the flags
+	bne.w	_afs_walk
+;-- window in 512-byte blocks: cylinders * Surfaces * BlocksPerTrack, in
+;   blocks of SizeBlock longs (a multiple of 128). A window past 32 bits
+;   ends at block $FFFFFFFF.
+	move.l	DE_SizeBlock*4(a1),d1
+	moveq.l	#127,d0
+	and.l	d1,d0
+	bne.w	_afs_walk
+	lsr.l	#7,d1			;d1 = 512-byte blocks per block
+	beq.w	_afs_walk
+	move.l	DE_Surfaces*4(a1),d0
+	UMUL32
+	bvs.w	_afs_walk
+	move.l	DE_BlocksPerTrk*4(a1),d1
+	UMUL32
+	bvs.w	_afs_walk
+	move.l	d0,d2			;d2 = blocks per cylinder
+	beq.w	_afs_walk
+	move.l	DE_LowCyl*4(a1),d0
+	move.l	d2,d1
+	UMUL32
+	bvs.w	_afs_walk		;starts past 32 bits: not over this entry
+	move.l	d0,d3			;d3 = first block of the node
+	moveq.l	#-1,d6			;d6 = last block of the node
+	move.l	DE_HighCyl*4(a1),d0
+	addq.l	#1,d0
+	beq.s	_afs_cmp
+	move.l	d2,d1
+	UMUL32
+	bvs.s	_afs_cmp
+	subq.l	#1,d0
+	move.l	d0,d6
+_afs_cmp:
+	cmp.l	d5,d3			;node starts after the entry ends
+	bhi.w	_afs_walk
+	cmp.l	d4,d6			;node ends before the entry starts
+	blo.w	_afs_walk
+	move.l	a2,d0
+	bra.s	_afs_out
+_afs_none:
+	moveq.l	#0,d0
+_afs_out:
+	move.l	a5,a6
+	jsr	Permit(a6)		;preserves d0
+	movem.l	(sp)+,d1-d7/a0-a2/a6
+	rts
+
+;-- _afsMem: d0 = BPTR -> a1 = address when nonzero and in system memory,
+;   Z clear; else Z set. a6 = ExecBase. Clobbers d0/d1/a0.
+_afsMem:
+	lsl.l	#2,d0
+	beq.s	_afm_out
+	move.l	d0,-(sp)
+	move.l	d0,a1
+	jsr	TypeOfMem(a6)
+	move.l	(sp)+,a1
+	tst.l	d0
+_afm_out:
+	rts
+
+;-- _afsRecorded: d0 = DeviceNode; Z clear when a row records it as its node.
+;   a5 = ExecBase. Clobbers d0/d1/a0/a1.
+_afsRecorded:
+	move.l	d0,d1
+	bsr	_partGetResource
+	tst.l	d0
+	beq.s	_afr_out
+	move.l	d0,a0
+	move.l	PTR_PartList(a0),a0
+_afr_walk:
+	tst.l	(a0)
+	beq.s	_afr_no
+	cmp.l	pe_DevNode(a0),d1
+	beq.s	_afr_yes
+	move.l	(a0),a0
+	bra.s	_afr_walk
+_afr_yes:
+	moveq.l	#1,d0
+	rts
+_afr_no:
+	moveq.l	#0,d0
+_afr_out:
+	rts
+
+;===========================================================
 ; _actPrefix: d0 = the entry's detected DosType prefix (high three bytes).
 ; In: a3 = entry.
 ;===========================================================
@@ -558,6 +724,14 @@ _amo_stamped:
 	move.l	d1,a0
 	tst.l	DE_LowCyl*4(a0)
 	bne.w	_amo_create		;fixed window -> build a fresh node
+;-- and only a FAT one: another filesystem on LowCyl 0 (e.g. CrossDOS) is a
+;   hand mount over the whole device, which _amo_create records as static
+	cmp.l	#DE_DOSTYPE,(a0)
+	blo.w	_amo_create
+	move.l	DE_DOSTYPE*4(a0),d1
+	clr.b	d1
+	cmp.l	#DOSTYPE_FAT,d1
+	bne.w	_amo_create
 	bsr	_actResolveCfg		;record MFlg/Ctrl/NodeDosType for the entry
 	move.l	d0,pe_DevNode(a3)
 	bset	#PEB_MOUNTED,d3
@@ -573,6 +747,44 @@ _amo_stamped:
 	bra.w	_amo_next
 
 _amo_create:
+;-- a hand-mounted node already serving these blocks: record it as the row's
+;   static mount instead of starting a second handler on the same blocks,
+;   unless the caller lets a mount claim a partition another handler serves
+	btst	#PEB_MOUNTUSED,d3
+	bne.s	_amo_build
+	bsr	_actFindStatic
+	tst.l	d0
+	beq.s	_amo_build
+	move.l	d0,pe_DevNode(a3)
+	move.l	d0,a0
+	move.l	40(a0),d0		;dn_Name (BPTR BSTR)
+	lsl.l	#2,d0
+	move.l	d0,a0
+	lea	pe_MountName(a3),a1
+	moveq.l	#0,d0
+	move.b	(a0),d0
+	cmp.b	#31,d0
+	bls.s	_amo_snl
+	moveq.l	#31,d0
+_amo_snl:
+	move.b	d0,(a1)+
+	addq.l	#1,a0
+	bra.s	_amo_snt
+_amo_snc:
+	move.b	(a0)+,(a1)+
+_amo_snt:
+	dbra	d0,_amo_snc
+	bset	#PEB_MOUNTED,d3
+	move.b	d3,pe_Flags(a3)
+	ifd	DEBUG
+	lea	dbg_pt_served(pc),a0
+	bsr	_bootDebug
+	lea	pe_MountName(a3),a0
+	bsr	_bootDebugBStrR
+	bsr	_bootDebugPartTail
+	endc
+	bra.w	_amo_next
+_amo_build:
 	bsr	_actBuildBlob
 	tst.l	d0
 	beq.w	_amo_next

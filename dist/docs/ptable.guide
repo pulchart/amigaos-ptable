@@ -501,7 +501,11 @@ partitions:
 Static mounts can be exempted from tear-down. A static mount is an entry
 whose DOS node the library did not build itself: a hand-mounted
 @{fg shine}DEVS:DOSDrivers@{fg text} entry that claimed its partition via @{fg shine}RegisterPartition@{fg text} ,
-or one the mount-time name reuse adopted. The exemption is per-entry
+one the mount-time name reuse adopted, or a hand-mounted node on the
+same device and unit whose blocks overlap the partition. @{fg shine}MountPartitions@{fg text}
+records such a node as the entry's mount instead of starting a second
+handler on the same blocks, unless @{fg shine}MOUNT_USED@{fg text} allows it; a full build
+prints @{fg shine}served by hand mount@{fg text} on serial. The exemption is per-entry
 resource state: @{fg shine}MountPartitions@{fg text} stamps the caller's @{fg shine}mc_UnmFlags@{fg text} keep
 policy into the entry's @{fg shine}PEB_KEEPSTATIC@{fg text} bit on every pass,
 @{fg shine}UnmountPartitions@{fg text} obeys the bit, and @{fg shine}lsptres@{fg text} shows it in the fifth Flags
