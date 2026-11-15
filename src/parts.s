@@ -161,12 +161,15 @@ _psm_ext:	dc.b	$05,$0f,$85,0
 ;
 ; Input : a2 = &PartRec output buffer, a3 = block-reader callback
 ;              (d0 = block LBA -> d0 = 0 on success & a0 = &512B
-;               buffer; preserves d2-d7/a2-a4), a4 = callback context
+;               buffer; preserves d2-d7/a2-a4), a4 = callback context.
+;              The buffer must stay valid until the next call.
 ; Output: d0 = record count
 ; Preserves d2-d7/a2-a6 (a0/a1 scratch).
 ;===========================================================
 _partScanGPT:
 	movem.l	d2-d7/a5,-(sp)
+	clr.l	-(sp)			;4(sp) = entry block buffer, 0 = none yet
+	clr.l	-(sp)			;0(sp) = its LBA
 	moveq.l	#0,d7			;d7 = record count
 ;-- read LBA 1 (GPT header)
 	moveq.l	#1,d0
@@ -231,10 +234,18 @@ _psg_eloop:
 	lsr.l	#1,d0			;d0 = offset / 512
 	add.l	d4,d0			;d0 = absolute LBA of the entry block
 	bcs.w	_psg_done		;do not read a wrapped LBA
+	tst.l	4(sp)
+	beq.s	_psg_read
+	cmp.l	(sp),d0
+	beq.s	_psg_have		;entries share a block: read it once
+_psg_read:
+	move.l	d0,(sp)
 	jsr	(a3)
 	tst.l	d0
 	bne.w	_psg_done
-	move.l	a0,a1
+	move.l	a0,4(sp)
+_psg_have:
+	move.l	4(sp),a1
 	add.l	d3,a1			;a1 = &partition entry
 	tst.l	(a1)			;type GUID all-zero -> unused
 	beq.w	_psg_enext
@@ -281,6 +292,7 @@ _psg_enext:
 	bra.w	_psg_eloop
 _psg_done:
 	move.l	d7,d0
+	addq.l	#8,sp
 	movem.l	(sp)+,d2-d7/a5
 	rts
 

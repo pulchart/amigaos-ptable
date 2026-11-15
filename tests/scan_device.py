@@ -18,7 +18,7 @@ import images as im
 import mockdev as md
 from mockexec import Rig, builds
 
-OPEN = {'A', 'I', 'J-max', 'J-gpt'}
+OPEN = {'A', 'I', 'J-max'}
 
 FAT = 0x46415400
 PES_MBR, PES_GPT, PES_RDB, PES_FLAT = 0, 1, 2, 3
@@ -289,8 +289,9 @@ def c_gpt_reads(b):
     disk = md.Disk(im.gpt_disk([(im.MS_BASIC, 2048 + i * 2048, 4095 + i * 2048)
                                 for i in range(4)]))
     rig = scan(b, disk)
+    # Block 2 is read by the RDB probe of blocks 0..15 and by the GPT walker.
     reads = [e for e in disk.log if e[0] == 'read' and e[2] == 2 * 512]
-    return len(rig.rows()) == 4 and len(reads) == 1 and clean(rig)
+    return len(rig.rows()) == 4 and len(reads) == 2 and clean(rig)
 
 
 CASES = [
