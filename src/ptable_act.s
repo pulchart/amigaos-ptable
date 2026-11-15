@@ -590,6 +590,7 @@ _amo_create:
 	move.l	d6,pe_DevNode(a3)
 	move.l	d6,pe_BlobPtr(a3)
 	move.l	#DN_BLOB_SIZE,pe_BlobSize(a3)
+	move.b	#1,BC_HaveNodes(a4)	;the node holds BC_DevNameBSTR
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
 	addq.l	#1,d7
