@@ -42,7 +42,7 @@ graph TD
   G --> F
 ```
 
-**Hotplug attach (DOS time).** A card insert wakes the consumer's mount worker, which publishes then mounts the card's partitions.
+**Hotplug attach (DOS time).** A card insert wakes the consumer's mount worker, which publishes then mounts the card's partitions. `MountPartitions` takes each handler from the consumer's MountCfg rows (`HANDLER_<fs>` and the other `cfd.prefs` keys) and leaves blocks a hand mount already serves to that mount.
 
 ```mermaid
 graph TD
@@ -50,7 +50,8 @@ graph TD
   B --> C[mount-worker process]
   C --> D[ScanPartitions]
   D --> E[MountPartitions]
-  E --> F[partition.resource]
+  E --> G[handler from MountCfg rows]
+  G --> F[partition.resource]
 ```
 
 **Hotplug detach (card removed).** Two policies (see [Configuration](#configuration)): keep the handler or tear it down.
@@ -65,7 +66,7 @@ graph TD
   D --> G[the rest kept, marked absent]
 ```
 
-**Handler mount, auto-detect (e.g. fat95).** A handler probes a card, lets `ScanPartitions` publish the candidates, picks its partition, and overlays its real DOS name with `RegisterPartition`.
+**Handler mount, auto-detect (e.g. fat95).** A handler probes a card, lets `ScanPartitions` publish the candidates, picks its partition, and overlays its real DOS name with `RegisterPartition`. It records the filesystem of the volume it finds with `SetPartitionFs`, e.g. `FAT32`, and an accepted `ACTION_DIE` clears its entry with `UnregisterPartition`.
 
 ```mermaid
 graph TD
@@ -73,7 +74,8 @@ graph TD
   B --> C[ScanPartitions]
   C --> D[select FAT partition]
   D --> E[RegisterPartition]
-  E --> F[partition.resource: real name + MOUNTED]
+  E --> G[volume found: SetPartitionFs]
+  G --> F[partition.resource: name + MOUNTED + FAT type]
 ```
 
 ## Partition names
@@ -84,7 +86,7 @@ graph TD
 
 - **PREFIX:** a short device abbreviation from a built-in table, or, for devices not in the table, the device's base name with `.device` stripped and the `A-Z` and `0-9` characters uppercased. Currently only `compactflash.device` has an abbreviation (`CF`); everything else falls back to the base name.
 - **unit-letter:** lowercase `a` + unit (`a` = unit 0, `b` = unit 1, up to `p` = unit 15). Omitted on unit 0 of a device whose abbreviation-table entry is flagged single-unit; currently `compactflash.device`, so its names carry no letter.
-- **partition-number:** 0-based table index: MBR primary slots 0-3, logical partitions from 4 whichever slot holds the extended partition (only one is read), GPT entry number. A slot that is empty, not FAT, or holds the extended partition gets no name: its number is skipped, so the first logical is always `CF4`. Indexes stop at 99, and a card publishes at most 12 MBR or GPT partitions.
+- **partition-number:** 0-based table index: MBR primary slots 0-3, logical partitions from 4 whichever slot holds the extended partition (only one is read), GPT entry number. A slot that is empty, not FAT, or holds the extended partition gets no name: its number is skipped, so the first logical is always `CF4`. Indexes stop at 99, so a card publishes at most 100 MBR or GPT partitions.
 
 | MBR slot | Content | Name |
 |----------|---------|------|
