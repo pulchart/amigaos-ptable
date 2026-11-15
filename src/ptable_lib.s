@@ -147,6 +147,12 @@ IO_Offset	= 44
 IO_Sizeof	= 56
 
 TD_CHANGESTATE	= 14
+TD_GETGEOMETRY	= 22			;CMD_NONSTD+13
+
+;struct DriveGeometry (TD_GETGEOMETRY payload)
+DG_SectorSize	= 0
+DG_TotalSectors	= 4
+DG_Sizeof	= 32
 CMD_READ	= 2
 TD_READ64	= 24
 HD_SCSICMD	= 28
