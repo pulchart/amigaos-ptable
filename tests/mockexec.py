@@ -316,6 +316,8 @@ class Rig:
                         'high': self.mem.r32(env + 4 * 10) if env else None,
                         'dostype': self.mem.r32(env + 4 * 16) if env else None,
                         'seglist': self.mem.r32(node + 32),
+                        'stack': self.mem.r32(node + 20),
+                        'pri': self.mem.r32(node + 24),
                         'handler': bytes(self.mem.r_block(hdlr + 1, self.mem.r8(hdlr))).decode()
                                    if hdlr else None})
             bptr = self.mem.r32(node)
