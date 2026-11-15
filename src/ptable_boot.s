@@ -284,7 +284,8 @@ BC_ScanErr	= 176		;byte: a read failed during this scan's walk
 BC_BlockShift	= 177		;byte: log2 of the device block size, 9..12
 BC_Medium	= 180		;device blocks on the medium, 0 = unknown
 BC_Bind		= 184		;APTR binding row of the entry being built, 0 = none
-BC_Sizeof	= 188
+BC_BlobSize	= 188		;bytes of the blob _actBuildBlob allocated last
+BC_Sizeof	= 192
 
 BC_BUF_BYTES	= 4096		;the largest device block read
 
@@ -299,7 +300,9 @@ DN_HDLR_OFF	= 208		;24-byte handler-path BSTR (dn_Handler points here when
 				;representable. Copied per node rather than pointed
 				;at the caller's string, which it does not own past
 				;the call, and which DOS reads much later.
-DN_BLOB_SIZE	= 232
+DN_BLOB_SIZE	= 232		;fixed part; the device-name BSTR follows it
+				;(fssm_Device points there), so the node frees
+				;its own copy with the blob
 DN_HDLR_MAX	= 23		;chars a DN_HDLR_OFF BSTR holds (24 - length byte)
 
 ;-- hand-written offsets: let the assembler check the blob still tiles, and
@@ -310,7 +313,7 @@ DN_HDLR_MAX	= 23		;chars a DN_HDLR_OFF BSTR holds (24 - length byte)
 	ifne	DN_BLOB_SIZE-(DN_HDLR_OFF+24)
 	fail	"DN_BLOB_SIZE does not cover the handler BSTR"
 	endc
-	ifne	(DN_CTRL_OFF&3)|(DN_HDLR_OFF&3)
+	ifne	(DN_CTRL_OFF&3)|(DN_HDLR_OFF&3)|(DN_BLOB_SIZE&3)
 	fail	"a blob BSTR is not 4-aligned (BPTR needs it)"
 	endc
 	ifne	DN_HDLR_MAX-(DN_BLOB_SIZE-DN_HDLR_OFF-1)
@@ -919,14 +922,11 @@ _bbo_out:
 
 
 ;===========================================================
-; _bootFreeDevBSTR: free BC_DevNameBSTR when no node took it
-; (BC_HaveNodes clear).
+; _bootFreeDevBSTR: free BC_DevNameBSTR; every node carries its own copy.
 ; In : a4 = &BootCtx, a5 = ExecBase. Preserves d0-d1/a0-a1/a6.
 ;===========================================================
 _bootFreeDevBSTR:
 	movem.l	d0-d1/a0-a1/a6,-(sp)
-	tst.b	BC_HaveNodes(a4)
-	bne.s	_bfdb_out
 	move.l	BC_DevNameBSTR(a4),d0
 	beq.s	_bfdb_out
 	clr.l	BC_DevNameBSTR(a4)
@@ -954,8 +954,8 @@ _bfdb_out:
 ; Input : a0 = NUL-terminated C string, a4 = &BootCtx,
 ;         a6 = ExecBase
 ; Output: d0 = BPTR (already >>2) to BSTR, or 0 on failure
-;         (The nodes built in the call keep it: it outlives BootCtx for
-;          their FSSMs. _bootFreeDevBSTR frees it when no node was built.)
+;         (Freed by _bootFreeDevBSTR at the end of the call; each node
+;          copies it into its blob.)
 ;===========================================================
 _bootMakeExecBSTR:
 	movem.l	d1-d3/a0-a2,-(sp)

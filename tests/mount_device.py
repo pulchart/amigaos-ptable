@@ -99,6 +99,23 @@ def c_mount_mbr(b):
             and sorted(nodes) == [('TESTa0', 0, MARKER), ('TESTa1', 0, MARKER)] and clean(rig))
 
 
+def c_own_device_name(b):
+    """Each node carries its own device-name BSTR inside its blob."""
+    rig = rig_for(b, im.mbr_disk([(0, 0x0C, 2048, 0x8000), (0, 0x0C, 0x9000, 0x4000)]))
+    with_fat_handler(rig)
+    rig.scan()
+    rig.mount()
+    blobs = {r['name']: rig.mem.r32(r['addr'] + rig.eq['pe_BlobPtr']) for r in rig.rows()}
+    out = []
+    for d in rig.dos_nodes():
+        blob, dev = blobs[d['name']], d['device']
+        size = rig.mem.r32([r for r in rig.rows() if r['name'] == d['name']][0]['addr']
+                           + rig.eq['pe_BlobSize'])
+        name = bytes(rig.mem.r_block(dev + 1, rig.mem.r8(dev))).decode()
+        out.append(blob < dev and dev + 1 + len(name) <= blob + size and name == 'test.device')
+    return out == [True, True] and clean(rig)
+
+
 def c_mount_rdb(b):
     rig = rig_for(b, rdb([('DH0', 2, 101, DOS3)]))
     rig.add_fs_entry(DOS3, 0x00280001)
@@ -398,6 +415,7 @@ def c_bind_old_size(b):
 CASES = [
     (None, 'mount mbr', c_mount_mbr), (None, 'mount rdb', c_mount_rdb),
     (None, 'second pass builds nothing', c_remount_same),
+    ('F5', 'node owns its device name', c_own_device_name),
     (None, 'older rdb filesystem not loaded', c_fshd_older),
     ('F4', 'absent rows not mounted', c_absent_not_mounted),
     ('F5', 'idle mount pass leaks nothing', c_no_leak_idle),
