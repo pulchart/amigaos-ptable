@@ -172,6 +172,8 @@ _abb_noctrl:
 	tst.l	d0
 	bne.w	_abb_fse
 	move.l	pe_NodeDosType(a3),d0
+	cmp.l	#$444F5300,d0		;DOS\0: the ROM filesystem serves it, the
+	beq.w	_abb_plain		;node stays unpatched as stock mounts it
 	and.l	#$FFFFFF00,d0
 	cmp.l	#DOSTYPE_FAT,d0		;FAT is shareable: one registered handler
 					;serves any FAT\x dostype (see ptable_fs.s)
@@ -226,6 +228,7 @@ _abb_fse:
 	move.l	d0,a1
 	move.l	a2,a0
 	bsr	_bootPatchDNfromFSE
+_abb_plain:
 	move.l	a2,d0
 	movem.l	(sp)+,d2-d3/a2/a6
 	rts
