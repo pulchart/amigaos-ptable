@@ -452,6 +452,15 @@ def run_suite(cpu, flavour):
                         'index': 0, 'flags': gptf}]))
             w.close()
 
+        # Entries sharing a block cost one read of it; the next block one more.
+        blocks = {1: gpt_header(count=6)}
+        blocks.update(entry_blocks([gpt_entry(MS_BASIC, 2048 + i * 16, 2055 + i * 16)
+                                    for i in range(6)]))
+        w = Walker(image, eq, blocks)
+        n = w.run('_partScanGPT')
+        check('gpt entry block read once', (n, w.reads), (6, [1, 2, 3]))
+        w.close()
+
         for label, blocks in (
                 ('no header block', {}),
                 ('bad magic', {1: gpt_header(magic=b'NOT PART')}),
