@@ -91,7 +91,8 @@ struct PartEntry {
                                   *     appended fields against this) */
     UBYTE        pe_pad3[2];     /* 246 (pad to pe_NodeDosType) */
     ULONG        pe_NodeDosType; /* 248 layout 3: DosType stamped on the node */
-    UBYTE        pe_Reserved[8]; /* 252..259 */
+    UBYTE        pe_FsName[8];   /* 252 layout 6: filesystem from the registrant,
+                                  *     NUL-padded, no NUL when 8 long */
 };                               /* 260 */
 
 static const char *src_name(UBYTE s)
@@ -146,8 +147,23 @@ static const char *ctrl_str(const struct PartEntry *pe)
 
 /* publisher layout is 4 or newer: PEF_KEEPSTATIC is meaningful */
 static int g_layout4;
-/* publisher layout is 6 or newer: pe_BlockShift is meaningful */
+/* publisher layout is 6 or newer: pe_BlockShift and pe_FsName are meaningful */
 static int g_layout6;
+
+/* Filesystem the handler reported for its partition, empty when unknown */
+static const char *fs_str(const struct PartEntry *pe)
+{
+    static char s[9];
+    int i;
+
+    s[0] = '\0';
+    if (!g_layout6)
+        return s;
+    for (i = 0; i < 8 && pe->pe_FsName[i] >= ' ' && pe->pe_FsName[i] < 127; i++)
+        s[i] = pe->pe_FsName[i];
+    s[i] = '\0';
+    return s;
+}
 
 /* 5-char flag picture. First char is three-valued: P present, I invalid
    (a card is in but it has no partition for this mounted slot), - absent.
@@ -258,14 +274,15 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
            "Name", "Device", "Unit", "Part", "Src", "Pri",
            "DosType", "Text", "Flags", "MFlg", "Ctrl");
     if (verbose)
-        pout(" %-5s %10s %11s %6s", "CMD", "Start", "Blocks", "Size");
+        pout(" %-5s %10s %11s %6s %-8s", "CMD", "Start", "Blocks", "Size", "FS");
     pout("\n");
 
     pout("%-12s %-13s %4s %4s %-3s %3s %-10s %-4s %-5s %5s %-10s",
            "------------", "-------------", "----", "----", "---", "---",
            "----------", "----", "-----", "-----", "----------");
     if (verbose)
-        pout(" %-5s %10s %11s %6s", "-----", "----------", "-----------", "------");
+        pout(" %-5s %10s %11s %6s %-8s", "-----", "----------", "-----------", "------",
+             "--------");
     pout("\n");
 
     for (row = 0; row < count; row++) {
@@ -305,11 +322,11 @@ static void view_all(struct Snap *sn, int count, int verbose, int nodedt)
                 size = (unsigned long)((pe->pe_BlockCount << shift) >> 10);
                 unit = 'K';
             }
-            pout(" %-5s %10lu %11lu %5lu%c",
+            pout(" %-5s %10lu %11lu %5lu%c %-8s",
                    cmd_name(pe->pe_ReadMode),
                    (unsigned long)pe->pe_StartLBA,
                    (unsigned long)pe->pe_BlockCount,
-                   size, unit);
+                   size, unit, fs_str(pe));
         }
         pout("\n");
     }
@@ -319,7 +336,7 @@ static void usage(void)
 {
     pout("lsptres " STR(VERSION) " - list partition.resource\n"
            "Usage: lsptres [VERBOSE|V]\n"
-           "  VERBOSE (V)  also show CMD / Start / Blocks / Size (lines may wrap)\n"
+           "  VERBOSE (V)  also show CMD / Start / Blocks / Size / FS (lines may wrap)\n"
            "\n"
            "Name:  partition name, plus \">dosname\" when mounted under another name\n"
            "Src:   MBR GPT RDB FLT   (partition scheme)\n"
@@ -330,7 +347,8 @@ static void usage(void)
            "Ctrl:  CONTROL string resolved for this mount\n"
            "DosType: the DosType the mount uses - for a mounted partition the\n"
            "       one its node carries, else the one detected on the card\n"
-           "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\n");
+           "CMD:   (verbose) read command: NSCMD / TD64 / SCSI / CMD\n"
+           "FS:    (verbose) filesystem the mounted handler found, e.g. FAT32\n");
 }
 
 static int run(void)

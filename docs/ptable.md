@@ -273,6 +273,8 @@ RegisterPartition(deviceName:a1, unit:d0, startLBA:d1, blockCount:d2,
                   nodeDosType:d5)                                 -54
 MarkAbsent(deviceName:a1, unit:d0)                         -60
 UnregisterPartition(deviceName:a1, unit:d0, startLBA:d1, devNode:a2)  -66
+SetPartitionFs(deviceName:a1, unit:d0, startLBA:d1, devNode:a2,
+               fsName:a0)                                         -72
 ```
 
 | LVO | Returns in d0 | Call from |
@@ -284,12 +286,14 @@ UnregisterPartition(deviceName:a1, unit:d0, startLBA:d1, devNode:a2)  -66
 | `RegisterPartition` | 1 updated, 0 not found | any task, Exec context |
 | `MarkAbsent` | entries cleared | any task, Exec context |
 | `UnregisterPartition` | 1 cleared, 0 no-op | any task, Exec context |
+| `SetPartitionFs` | 1 set, 0 no-op | any task, Exec context |
 
 Notes a consumer needs:
 
 - `MarkAbsent` never blocks: it takes the resource lock with an attempt and does nothing at all if the lock is busy, so a return of 0 does not mean there were no entries.
 - `RegisterPartition` matches on device, unit and start block. `control` is a BSTR pointer, `0` for none. `nodeDosType` (d5) records the DosType the handler mounted with into `pe_NodeDosType`, `0` meaning unknown. Register inputs cannot be gated by a declared size the way `mc_` fields are, so a future input means a new LVO.
 - `UnregisterPartition` is the inverse, for a handler whose `ACTION_DIE` was accepted outside a ptable teardown: the entry returns to published-only and the partition is the automount's again; an extra-mount row is unlinked and freed. Only the registrant may clear its own entry (`devNode` must match). Like `MarkAbsent` it only attempts the lock, and skips when a teardown holds it.
+- `SetPartitionFs` lets the registrant record the filesystem it found on its partition as a C string, e.g. `"FAT32"`, in `pe_FsName`; up to 8 characters are kept, and `fsName = 0` clears it when its volume is gone. It matches like `UnregisterPartition` and only attempts the lock. `RegisterPartition` and `UnregisterPartition` clear the value. A handler checks that the library's `lib_NegSize` covers `-72` before calling it.
 - `cfg` is a `MountCfg` (or `0` for cold-boot defaults): global `mc_Flags` and `mc_Control` plus a 0-terminated per-dostype override table, resolved by `(pe_DosType & $FFFFFF00)`, `mc_NodeDosType` / `mc_NodeHandler`, and the binding rows. The override row is deliberately not grown for new settings: the library strides that table with its own idea of the row size, so a caller built against a different header would desynchronise. New settings go in the `mc_` block, behind `mc_Size` - the caller's own `mc_Sizeof`, MountCfg's `de_TableSize`: a field appended in a later release is read only when the caller's declared size covers it.
 - `prefixList` is a 0-terminated list of dostype high three bytes, e.g. `$50465300` for `PFS`.
 - `BootScanPartitions` also registers a synthetic ConfigDev (Vendor ID `65535`, Product ID `1`) when it registered at least one node, which is what puts the device in the Early Startup boot menu and in `ShowConfig`.
