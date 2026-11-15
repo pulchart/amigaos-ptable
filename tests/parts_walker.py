@@ -179,9 +179,9 @@ def scanner_cases(image, eq, check):
          [(eq['PES_GPT'], 200, 8)]),
         ('ordinary selects MBR despite GPT header', {**gpt, 0: ordinary, 100: fat_boot()},
          [(eq['PES_MBR'], 100, 8)]),
-        ('protective second slot stays MBR',
+        ('protective second slot selects GPT',
          {**gpt, 0: mbr([(0, 0x06, 100, 8), (0, 0xee, 1, 1000)]), 100: fat_boot()},
-         [(eq['PES_MBR'], 100, 8)]),
+         [(eq['PES_GPT'], 200, 8)]),
         # An unreadable block 0 leaves the published rows as they are.
         ('block zero read fails', gpt, [], []),
         ('GPT header read fails', {0: protective, 2: gpt[2], 200: fat_boot()}, []),

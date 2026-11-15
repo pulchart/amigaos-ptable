@@ -64,9 +64,16 @@ _srn_rdsk_next:
 	bsr	_partIsMBR		;slot table well-formed?
 	tst.l	d0
 	beq.w	_srn_whole		;boot code or another volume, not a table
+;-- a protective entry in any slot means GPT; a hybrid MBR mirrors only
+;   some of the GPT partitions in the other slots
 	move.l	BC_BlockBuf(a4),a0
-	cmpi.b	#$EE,446+4(a0)
+	lea	446+4(a0),a1
+	moveq.l	#3,d1
+_srn_ee:
+	cmpi.b	#$EE,(a1)
 	beq.w	_srn_gpt
+	lea	16(a1),a1
+	dbra	d1,_srn_ee
 	bra.w	_srn_mbr
 
 ;- - RDB: FSHD handler load, then publish each PART block - -
