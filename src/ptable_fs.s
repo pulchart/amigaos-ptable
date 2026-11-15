@@ -62,6 +62,9 @@ _bao_cnt_loop:
 	move.l	BC_BlockBuf(a4),a0
 	cmpi.l	#LSEG_ID,(a0)
 	bne.w	_bao_free_fshd
+	moveq.l	#3,d1
+	bsr	_bootBlockOK
+	bne.w	_bao_free_fshd
 	add.l	#RDB_BLOCK_BYTES-lsb_LoadData,d4
 	cmp.l	#$100000,d4		;cap at 1 MiB; tested inside the loop so a
 	bhi.w	_bao_free_fshd		;cyclic lsb_Next chain cannot hang cold boot
@@ -97,6 +100,11 @@ _bao_cp_loop:
 	bne.w	_bao_free_seg
 	move.l	BC_BlockBuf(a4),a1
 	cmpi.l	#LSEG_ID,(a1)
+	bne.w	_bao_free_seg
+	exg	a0,a1
+	moveq.l	#3,d1
+	bsr	_bootBlockOK
+	exg	a0,a1			;exg leaves the flags alone
 	bne.w	_bao_free_seg
 	move.l	lsb_Next(a1),d5
 	lea	lsb_LoadData(a1),a1

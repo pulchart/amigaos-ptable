@@ -311,8 +311,23 @@ class Rig:
             node = self.mem.r32(node)
         return out
 
+    def fs_entries(self):
+        """FileSystem.resource entries as (address, DosType, Version, SegList BPTR)."""
+        eq, res, out = self.eq, self.res.get('FileSystem.resource', 0), []
+        if not res:
+            return out
+        node = self.mem.r32(res + eq['fsr_FileSysEntries'])
+        while self.mem.r32(node):
+            out.append((node, self.mem.r32(node + eq['fse_DosType']),
+                        self.mem.r32(node + eq['fse_Version']),
+                        self.mem.r32(node + eq['fse_SegList'])))
+            node = self.mem.r32(node)
+        return out
+
     def owned(self):
-        """Allocations the resource legitimately keeps: itself, rows, names."""
+        """Allocations the resources legitimately keep: partition.resource with
+        its rows and names, FileSystem.resource with its entries and the
+        allocation behind each single-hunk SegList."""
         keep = set()
         res = self.resource()
         if res:
@@ -320,6 +335,12 @@ class Rig:
             for row in self.rows():
                 keep.add(row['addr'])
                 keep.add(self.mem.r32(row['addr'] + self.eq['pe_Device']))
+        fsr = self.res.get('FileSystem.resource', 0)
+        if fsr:
+            keep.add(fsr)
+            for node, _, _, seglist in self.fs_entries():
+                keep.add(node)
+                keep.add(seglist * 4 - 4)
         return keep
 
     def leaks(self):
