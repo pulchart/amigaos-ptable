@@ -433,6 +433,7 @@ MountPartitions:
 	bsr	_partUnlockRes
 
 _mp_closeexp:
+	bsr	_bootFreeDevBSTR
 	move.l	BC_ExpBase(a4),d0
 	beq.s	_mp_free
 	move.l	a5,a6
