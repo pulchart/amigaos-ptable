@@ -9,7 +9,6 @@ resources are real 68k structures, and DoIO is served by a mockdev.Disk.
 import atexit
 import re
 import shutil
-import struct
 import tempfile
 from pathlib import Path
 

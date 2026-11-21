@@ -15,7 +15,7 @@ from pathlib import Path
 
 from toolchain import VASM, EXPECTED_VASM_VERSION
 
-MIN_PYTHON = (3, 11)
+MIN_PYTHON = (3, 14)
 
 # Distribution name, the version the suite was last green against, and the hint.
 # The package names are not the import names: amitools-amifuse provides amitools.
