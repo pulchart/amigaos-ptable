@@ -53,7 +53,7 @@ def vasm_banner():
     try:
         out = subprocess.run([str(VASM), "-v"], capture_output=True, text=True, timeout=10)
         return (out.stdout + out.stderr).strip().splitlines()[0]
-    except (OSError, subprocess.SubprocessError, IndexError):
+    except OSError, subprocess.SubprocessError, IndexError:
         return "<not runnable>"
 
 
