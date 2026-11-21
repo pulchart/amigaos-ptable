@@ -250,7 +250,7 @@ lint:
 	$(Q)yamllint -s $$(git ls-files '*.yaml' '*.yml')
 
 clean:
-	$(Q)rm -rf dist build $(VERSION_INC)
+	$(Q)rm -rf dist/c dist/docs dist/full dist/small build
 
 distclean: clean
 	$(Q)rm -f ptable*.lha ptable*.readme

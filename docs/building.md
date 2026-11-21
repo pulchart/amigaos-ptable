@@ -4,7 +4,9 @@
 
 Podman. Every target runs in the [amiga-toolchain](https://github.com/pulchart/container-amiga-toolchain) image, which holds vasm, vbcc, the NDK, the test and lint tools, md2guide and lha. Outside the image `make` runs the requested targets there, in one container; inside it, as in CI, make runs them directly. make pulls a newer `latest` when the registry has one; `TOOLCHAIN_IMAGE=` selects another image, such as a dated tag or the Docker Hub copy.
 
-CI builds, lints and tests every pull request and master push in the same image, and fails when `dist/docs` differs from the guides `docs/` generates.
+`make` and `make guides` write the binaries and guides to `dist/`, which git ignores except for the version stamps `dist/*.version`.
+
+CI builds, lints and tests every pull request and master push in the same image and uploads `dist/` as the `ptable-dist` artifact.
 
 ## Release
 
