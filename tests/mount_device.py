@@ -4,8 +4,7 @@
 The real ScanPartitions, MountPartitions and MarkAbsent LVOs run on a mocked
 Exec with a mocked expansion.library (AddDosNode), the DOS device list and
 FileSystem.resource. Case ids: D handler binding rows, E RDB filesystems,
-F node adoption and static mounts, K caller strings. OPEN lists the ids whose fix has not landed: their
-check must still fail, and the fixing commit removes the id here.
+F node adoption and static mounts, K caller strings.
 
 Status: gated, run by make test.
 Run from the repository root: python3 tests/mount_device.py"""
@@ -15,8 +14,6 @@ import sys
 import images as im
 import mockdev as md
 from mockexec import Rig, builds, STATIC
-
-OPEN = set()
 
 FAT, MARKER, DOS0, DOS1, DOS3, PFS3 = (0x46415400, 0x464154FF, 0x444F5300, 0x444F5301,
                                        0x444F5303, 0x50465303)
@@ -88,7 +85,7 @@ def rdb(parts, **kw):
     return im.rdb_disk([(n, im.envec(lo, hi, dt), 1) for n, lo, hi, dt in parts], **kw)
 
 
-# -- baseline -----------------------------------------------------------------
+# -- partition mounts ---------------------------------------------------------
 def c_mount_mbr(b):
     rig = rig_for(b, im.mbr_disk([(0, 0x0C, 2048, 0x8000), (0, 0x0C, 0x9000, 0x4000)]))
     with_fat_handler(rig)
@@ -135,7 +132,7 @@ def c_remount_same(b):
     return n == 0 and len(adds(rig)) == 1
 
 
-# -- audit cases ----------------------------------------------------------------
+# -- binding and lifecycle checks ---------------------------------------------
 def c_absent_not_mounted(b):
     """F4: rows marked absent are not mounted."""
     rig = rig_for(b, im.mbr_disk([(0, 0x0C, 2048, 0x8000), (0, 0x0C, 0x9000, 0x4000)]))
@@ -550,12 +547,10 @@ def main():
                 ok = bool(fn(build))
             except AssertionError as e:
                 ok, label = False, '%s (%s)' % (label, e)
-            want = ident not in OPEN
-            if ok != want:
-                failures.append('%s %s [%s]: %s' % (build.name, label, ident or 'base',
-                                                    'passes, remove from OPEN' if ok else 'FAILS'))
+            if not ok:
+                failures.append('%s %s [%s]' % (build.name, label, ident or '-'))
             print('%-11s %-5s %-34s %s' % (build.name, ident or '-', label[:34],
-                                            'ok' if ok else 'open'))
+                                            'ok' if ok else 'FAIL'))
     for f in failures:
         print('FAIL', f)
     sys.exit(1 if failures else 0)
