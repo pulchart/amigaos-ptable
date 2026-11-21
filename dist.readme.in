@@ -5,7 +5,7 @@ Type:         util/libs
 Version:      @VERSION@
 Requires:     AmigaOS 2.0+
 Architecture: m68k-amigaos
-Replaces:     util/libs/ptable.v20261007.lha
+Replaces:     util/libs/ptable.v20261115.lha
 Kurz:         Partitionstabellen-Library
 
 ptable.library is the AmigaOS partition-table library (one place that parses
@@ -28,24 +28,12 @@ COMPONENTS IN THIS RELEASE
 WHAT'S NEW (@DATE@)
 =======================
 
-ptable.library 2.3:
-* MBR partitions of type 07 are passed to the filesystem handler, like GPT
-  basic data partitions.
-* A card with FFS, PFS or SFS and no partition table mounts as one volume.
-* Improved partition detection; a card can have up to 100 partitions, was 12.
-* Fewer wrong or missing partitions: boot code at the card start, damaged RDB
-  blocks, read errors and RDB partitions past 2 TB are handled.
-* A newer filesystem in the RDB replaces an older one in ROM, e.g. FFS 45
-  over FFS 40.
-* Improved detection of partitions already mounted from DEVS:DOSDrivers,
-  also under another name.
-* Card swap: partitions of the old card are no longer mounted for the new one.
-* HANDLER_<fs>, STACK_<fs> and PRI_<fs> in cfd.prefs also apply to RDB
-  partitions. A handler path over 23 characters is refused instead of cut.
-* Fixed a memory leak on every card insert.
-
-lsptres 1.3:
-* VERBOSE shows the filesystem on each partition, e.g. FAT32 (with fat95 4.2).
+ptable.library 2.4:
+* Fixed a crash under AROS with the full build, found by the new integration
+  tests of fat95 and cfd.
+* Simplified ConfigDev for a bootable RDB partition. It carries only the
+  fields strap needs to boot from it and is not registered with
+  AddConfigDev, so ShowConfig does not list it.
 
 REQUIREMENTS
 ============
