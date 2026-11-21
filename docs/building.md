@@ -2,9 +2,9 @@
 
 ## Requirements
 
-* vasm (`vasmm68k_mot`), default path `/opt/vasm` (`VASM_HOME=`)
-* vbcc and the NDK for `lsptres`, default path `/opt/vbcc` (`VBCC_HOME=`), NDK in `NDK/`
-* `../cfd/tools/md2guide.py` and python3 for the guides, `lha` for releases
+Podman. Every target runs in the [amiga-toolchain](https://github.com/pulchart/container-amiga-toolchain) image, which holds vasm, vbcc, the NDK, the test and lint tools, md2guide and lha. Outside the image `make` runs the requested targets there, in one container; inside it, as in CI, make runs them directly. make pulls a newer `latest` when the registry has one; `TOOLCHAIN_IMAGE=` selects another image, such as a dated tag or the Docker Hub copy.
+
+CI builds, lints and tests every pull request and master push in the same image, and fails when `dist/docs` differs from the guides `docs/` generates.
 
 ## Release
 
@@ -21,6 +21,7 @@ make clean; make; make guide; make release
 | `make stage` | archive tree in `build/stage` |
 | `make release` | Aminet LHA archive and readme |
 | `make test` | emulated test suite |
+| `make lint` | ruff and yamllint |
 | `make clean`, `distclean` | cleanup |
 
 ## Install script
