@@ -612,9 +612,9 @@ _amt_no:
 ;===========================================================
 ; _actCold: cold-register the mountable RDB entries for this unit. MBR/GPT/flat
 ; entries stay published only; a DOS-time consumer mounts them with its own config.
-; In : a4 = &BootCtx (BC_ExpBase, BC_ConfigDev, BC_DevNameBSTR set),
+; In : a4 = &BootCtx (BC_ExpBase, BC_DevNameBSTR set),
 ;      a5 = ExecBase; PTR_Lock held
-; Out: d0 = entries registered; BC_HaveNodes/BC_PartCount updated
+; Out: d0 = entries registered; BC_PartCount updated
 ;===========================================================
 _actCold:
 	movem.l	d2-d7/a2-a3/a6,-(sp)
@@ -675,7 +675,7 @@ _acd_mntchk:
 	move.l	pe_BootPri(a3),d0
 	moveq.l	#0,d1			;flags=0: strap starts dos later
 	move.l	d6,a0
-	move.l	BC_ConfigDev(a4),a1
+	lea	s_boot_configdev(pc),a1 ;strap reads it for the BootPoint
 	jsr	AddBootNode(a6)
 	tst.l	d0
 	beq.w	_acd_addfail
@@ -700,7 +700,6 @@ _acd_reg:
 	move.l	BC_BlobSize(a4),pe_BlobSize(a3)
 	bset	#PEB_MOUNTED,d3
 	move.b	d3,pe_Flags(a3)
-	move.b	#1,BC_HaveNodes(a4)
 	addq.b	#1,BC_PartCount(a4)
 	addq.l	#1,d7
 	bra.s	_acd_next		;registered blob belongs to the live node

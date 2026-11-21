@@ -16,24 +16,14 @@
 
 ;--- from expansion.library --------------------------------
 AddBootNode	= -36
-AddConfigDev	= -30
 AddDosNode	= -150
 
 ;--- ConfigDev layout (libraries/configvars.i) -------------
-;   Only the fields actually written by the synthetic ConfigDev
-;   below are defined here; full layout lives in NDK.
-CD_NODE_TYPE	= 8
-CD_NODE_NAME	= 10
+;   Only the fields strap reads; the static ConfigDev is in
+;   ptable_dosdiag.i.
 CD_ER_TYPE	= 16
-CD_ER_PRODUCT	= 17
-CD_ER_MANUF	= 20
-CD_ER_SERIAL	= 22
 CD_ER_RESERVED0C = 28
-CD_BOARDADDR	= 32
-CD_BOARDSIZE	= 36
 CD_SIZEOF	= 68
-
-NT_CONFIGDEV	= 20
 ERTF_DIAGVALID	= $10
 
 ;--- from dos.library --------------------------------------
@@ -236,13 +226,13 @@ PTDEC	macro
 ;      20     4   BC_FSResource   FileSystem.resource (lazy)
 ;      24     1   BC_DevOpen      1 if OpenDevice succeeded
 ;      25     1   BC_SigOK        allocated signal number, -1 = none
-;      26     1   BC_HaveNodes    1 if any AddBootNode/AddDosNode ran
+;      26     1   (unused)
 ;      27     1   BC_PartCount    count of partitions registered
 ;      28    34   BC_DevMsgPort
 ;      62    56   BC_DevIOReq
 ;     118     1   BC_ReadMode     cached read method (PERM_*, 0 = unprobed)
 ;     119     1   (pad to long)
-;     120     4   BC_ConfigDev    synthetic ConfigDev (0 = none)
+;     120     4   (unused)
 ;     124     4   BC_DevName      caller's device name string
 ;     128     4   BC_DevNameBSTR  cached BSTR(BPTR) of BC_DevName
 ;                                 for fssm_Device (0 = alloc failed,
@@ -267,12 +257,10 @@ BC_BlockBuf	= 16
 BC_FSResource	= 20
 BC_DevOpen	= 24
 BC_SigOK	= 25
-BC_HaveNodes	= 26
 BC_PartCount	= 27
 BC_DevMsgPort	= 28
 BC_DevIOReq	= 62
 BC_ReadMode	= 118		;cached read method (0 = not yet probed)
-BC_ConfigDev	= 120
 BC_DevName	= 124
 BC_DevNameBSTR	= 128
 BC_UnmountPrefixes = 132	;ptr to 0-terminated dostype-prefix list (UnmountPartitions); 0 = all
@@ -439,33 +427,6 @@ bs_haveCtx:
 	bra.w	bs_cleanup
 bs_haveExp:
 
-;-- Synthesize a ConfigDev for the device.
-;   (The ConfigDev's CD_NODE_NAME points at the caller's device
-;   name string so strap renders the early-startup menu against
-;   the correct device. ER_TYPE = ERTF_DIAGVALID together with
-;   er_Reserved0c -> s_rdb_diag_rom drives the BootPoint flow:
-;   strap copies the DiagArea to RAM and calls da_BootPoint,
-;   which then runs FindResident("dos.library") + RT_INIT.)
-	move.l	a5,a6			;ExecBase
-	move.l	#CD_SIZEOF,d0
-	move.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
-	jsr	AllocMem(a6)
-	tst.l	d0
-	beq.w	bs_no_cd
-	move.l	d0,BC_ConfigDev(a4)
-	move.l	d0,a2
-	move.b	#NT_CONFIGDEV,CD_NODE_TYPE(a2)
-	move.l	BC_DevName(a4),CD_NODE_NAME(a2)
-	move.b	#$C0|ERTF_DIAGVALID|4,CD_ER_TYPE(a2)	;Z-II, diag, 512KB
-	lea	s_rdb_diag_rom(pc),a0
-	move.l	a0,CD_ER_RESERVED0C(a2)
-	move.b	#1,CD_ER_PRODUCT(a2)
-	move.w	#$FFFF,CD_ER_MANUF(a2)		;no vendor
-	move.l	#$52444230,CD_ER_SERIAL(a2)	;'RDB0'
-	move.l	#$00A00000,CD_BOARDADDR(a2)	;PCMCIA attributes base
-	move.l	#$00080000,CD_BOARDSIZE(a2)	;512 KB
-bs_no_cd:
-
 ;-- open dos.library; used for Delay() only. OK to be NULL.
 	move.l	a5,a6
 	moveq.l	#0,d0
@@ -491,22 +452,6 @@ bs_no_cd:
 bs_close_unit:
 	bsr	_bootCloseUnit		;idempotent: handles partial open
 
-;-- Register synthetic ConfigDev with strap (eb_CDevList) so the
-;   early-startup boot menu shows the device and the BootPoint
-;   fires when the user picks a bootable partition. Guarded:
-;   only call when at least one partition was registered.
-	tst.b	BC_HaveNodes(a4)
-	beq.s	bs_close
-	move.l	BC_ConfigDev(a4),d0
-	beq.s	bs_close
-	move.l	BC_ExpBase(a4),d0
-	beq.s	bs_close
-	move.l	d0,a6
-	move.l	BC_ConfigDev(a4),a0
-	jsr	AddConfigDev(a6)
-	clr.l	BC_ConfigDev(a4)	;owned by expansion now
-
-bs_close:
 	move.l	BC_ExecBase(a4),a6
 	move.l	BC_DosBase(a4),d0
 	beq.s	bs_close1
@@ -520,13 +465,6 @@ bs_close1:
 
 bs_cleanup:
 	bsr	_bootFreeDevBSTR
-;-- a ConfigDev that was never handed to AddConfigDev is still ours
-	move.l	BC_ConfigDev(a4),d0
-	beq.s	bs_nocdfree
-	move.l	d0,a1
-	move.l	#CD_SIZEOF,d0
-	jsr	FreeMem(a6)
-bs_nocdfree:
 	moveq.l	#0,d6
 	move.b	BC_PartCount(a4),d6	;return value = partitions registered
 	ifd	DEBUG
@@ -1451,11 +1389,11 @@ _bddt_em:
 	rts
 
 _bootDebugDecW:
-	movem.l	d0-d5/a6,-(sp)
+	movem.l	d0-d5/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
 	and.l	#$ffff,d0
 	sub.l	#8,sp
-	move.l	sp,a0
+	move.l	sp,a2			;RawPutChar may clobber d0-d1/a0-a1
 	moveq.l	#4,d3
 _bddw_fill:
 	move.l	d0,d2
@@ -1464,27 +1402,27 @@ _bddw_fill:
 	swap	d1
 	and.l	#$ff,d1
 	add.b	#'0',d1
-	move.b	d1,0(a0,d3.l)
+	move.b	d1,0(a2,d3.l)
 	move.w	d2,d0
 	dbra	d3,_bddw_fill
 	moveq.l	#0,d3
 _bddw_skip:
 	cmp.b	#4,d3
 	bge.s	_bddw_print
-	move.b	0(a0,d3.l),d0
+	move.b	0(a2,d3.l),d0
 	cmp.b	#'0',d0
 	bne.s	_bddw_print
 	addq.l	#1,d3
 	bra.s	_bddw_skip
 _bddw_print:
-	move.b	0(a0,d3.l),d0
+	move.b	0(a2,d3.l),d0
 	and.l	#$ff,d0
 	jsr	RawPutChar(a6)
 	addq.l	#1,d3
 	cmp.b	#5,d3
 	blt.s	_bddw_print
 	add.l	#8,sp
-	movem.l	(sp)+,d0-d5/a6
+	movem.l	(sp)+,d0-d5/a2/a6
 	rts
 
 _bootDebugVersionNL:
@@ -1517,10 +1455,11 @@ _bootDebugVersionNL:
 ;   Callers: pb_DriveName (skip path, pre-blob) and the deduped
 ;   name in the DN blob (DN_BSTR_OFF, +boot/+dos paths).
 _bootDebugBStr:
-	movem.l	d0/d3/a0/a6,-(sp)
+	movem.l	d0/d3/a0/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
+	move.l	a0,a2			;RawPutChar may clobber d0-d1/a0-a1
 	moveq.l	#0,d3
-	move.b	(a0)+,d3
+	move.b	(a2)+,d3
 	cmp.w	#31,d3
 	bls.s	_bdbs_ok
 	moveq.l	#31,d3
@@ -1529,22 +1468,23 @@ _bdbs_ok:
 	bmi.s	_bdbs_nl
 _bdbs_lp:
 	moveq.l	#0,d0
-	move.b	(a0)+,d0
+	move.b	(a2)+,d0
 	jsr	RawPutChar(a6)
 	dbra	d3,_bdbs_lp
 _bdbs_nl:
 	moveq.l	#LF,d0
 	jsr	RawPutChar(a6)
-	movem.l	(sp)+,d0/d3/a0/a6
+	movem.l	(sp)+,d0/d3/a0/a2/a6
 	rts
 
 ;-- Print a BSTR (length byte + chars), NO trailing LF, so a name can
 ;   be followed by more text on the same line. a0 = BSTR, clamp 31.
 _bootDebugBStrR:
-	movem.l	d0/d3/a0/a6,-(sp)
+	movem.l	d0/d3/a0/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
+	move.l	a0,a2			;RawPutChar may clobber d0-d1/a0-a1
 	moveq.l	#0,d3
-	move.b	(a0)+,d3
+	move.b	(a2)+,d3
 	cmp.w	#31,d3
 	bls.s	_bdsr_ok
 	moveq.l	#31,d3
@@ -1553,19 +1493,19 @@ _bdsr_ok:
 	bmi.s	_bdsr_end
 _bdsr_lp:
 	moveq.l	#0,d0
-	move.b	(a0)+,d0
+	move.b	(a2)+,d0
 	jsr	RawPutChar(a6)
 	dbra	d3,_bdsr_lp
 _bdsr_end:
-	movem.l	(sp)+,d0/d3/a0/a6
+	movem.l	(sp)+,d0/d3/a0/a2/a6
 	rts
 
 ;-- Print d0.l as unsigned decimal (full 32-bit), no LF. Two divu
 ;   steps give a full 32-bit quotient; digits are stacked then emitted.
 _bootDebugDec32:
-	movem.l	d0-d5/a0/a6,-(sp)
+	movem.l	d0-d5/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
-	move.l	sp,a0			;digit-stack marker
+	move.l	sp,a2			;digit-stack marker, kept across RawPutChar
 	tst.l	d0
 	bne.s	_bdd_loop
 	moveq.l	#'0',d0
@@ -1595,14 +1535,14 @@ _bdd_loop:
 	tst.l	d0
 	bne.s	_bdd_loop
 _bdd_emit:
-	cmp.l	sp,a0
+	cmp.l	sp,a2
 	beq.s	_bdd_done
 	moveq.l	#0,d0
 	move.b	(sp)+,d0
 	jsr	RawPutChar(a6)
 	bra.s	_bdd_emit
 _bdd_done:
-	movem.l	(sp)+,d0-d5/a0/a6
+	movem.l	(sp)+,d0-d5/a2/a6
 	rts
 
 ;-- Print " (<dostype>, <MB> MB)" + LF for the PartEntry in a3.
