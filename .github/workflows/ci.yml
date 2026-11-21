@@ -1,0 +1,31 @@
+---
+name: CI
+
+"on":
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    # TOOLCHAIN_IMAGE in the Makefile
+    container: ghcr.io/pulchart/amiga-toolchain:latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trust the checkout, which another user owns
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Lint
+        run: make lint
+      - name: Build
+        run: make all guides
+      - name: Test
+        run: make test
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ptable-dist
+          path: dist/
