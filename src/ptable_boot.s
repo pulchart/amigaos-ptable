@@ -1451,11 +1451,11 @@ _bddt_em:
 	rts
 
 _bootDebugDecW:
-	movem.l	d0-d5/a6,-(sp)
+	movem.l	d0-d5/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
 	and.l	#$ffff,d0
 	sub.l	#8,sp
-	move.l	sp,a0
+	move.l	sp,a2			;RawPutChar may clobber d0-d1/a0-a1
 	moveq.l	#4,d3
 _bddw_fill:
 	move.l	d0,d2
@@ -1464,27 +1464,27 @@ _bddw_fill:
 	swap	d1
 	and.l	#$ff,d1
 	add.b	#'0',d1
-	move.b	d1,0(a0,d3.l)
+	move.b	d1,0(a2,d3.l)
 	move.w	d2,d0
 	dbra	d3,_bddw_fill
 	moveq.l	#0,d3
 _bddw_skip:
 	cmp.b	#4,d3
 	bge.s	_bddw_print
-	move.b	0(a0,d3.l),d0
+	move.b	0(a2,d3.l),d0
 	cmp.b	#'0',d0
 	bne.s	_bddw_print
 	addq.l	#1,d3
 	bra.s	_bddw_skip
 _bddw_print:
-	move.b	0(a0,d3.l),d0
+	move.b	0(a2,d3.l),d0
 	and.l	#$ff,d0
 	jsr	RawPutChar(a6)
 	addq.l	#1,d3
 	cmp.b	#5,d3
 	blt.s	_bddw_print
 	add.l	#8,sp
-	movem.l	(sp)+,d0-d5/a6
+	movem.l	(sp)+,d0-d5/a2/a6
 	rts
 
 _bootDebugVersionNL:
@@ -1517,10 +1517,11 @@ _bootDebugVersionNL:
 ;   Callers: pb_DriveName (skip path, pre-blob) and the deduped
 ;   name in the DN blob (DN_BSTR_OFF, +boot/+dos paths).
 _bootDebugBStr:
-	movem.l	d0/d3/a0/a6,-(sp)
+	movem.l	d0/d3/a0/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
+	move.l	a0,a2			;RawPutChar may clobber d0-d1/a0-a1
 	moveq.l	#0,d3
-	move.b	(a0)+,d3
+	move.b	(a2)+,d3
 	cmp.w	#31,d3
 	bls.s	_bdbs_ok
 	moveq.l	#31,d3
@@ -1529,22 +1530,23 @@ _bdbs_ok:
 	bmi.s	_bdbs_nl
 _bdbs_lp:
 	moveq.l	#0,d0
-	move.b	(a0)+,d0
+	move.b	(a2)+,d0
 	jsr	RawPutChar(a6)
 	dbra	d3,_bdbs_lp
 _bdbs_nl:
 	moveq.l	#LF,d0
 	jsr	RawPutChar(a6)
-	movem.l	(sp)+,d0/d3/a0/a6
+	movem.l	(sp)+,d0/d3/a0/a2/a6
 	rts
 
 ;-- Print a BSTR (length byte + chars), NO trailing LF, so a name can
 ;   be followed by more text on the same line. a0 = BSTR, clamp 31.
 _bootDebugBStrR:
-	movem.l	d0/d3/a0/a6,-(sp)
+	movem.l	d0/d3/a0/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
+	move.l	a0,a2			;RawPutChar may clobber d0-d1/a0-a1
 	moveq.l	#0,d3
-	move.b	(a0)+,d3
+	move.b	(a2)+,d3
 	cmp.w	#31,d3
 	bls.s	_bdsr_ok
 	moveq.l	#31,d3
@@ -1553,19 +1555,19 @@ _bdsr_ok:
 	bmi.s	_bdsr_end
 _bdsr_lp:
 	moveq.l	#0,d0
-	move.b	(a0)+,d0
+	move.b	(a2)+,d0
 	jsr	RawPutChar(a6)
 	dbra	d3,_bdsr_lp
 _bdsr_end:
-	movem.l	(sp)+,d0/d3/a0/a6
+	movem.l	(sp)+,d0/d3/a0/a2/a6
 	rts
 
 ;-- Print d0.l as unsigned decimal (full 32-bit), no LF. Two divu
 ;   steps give a full 32-bit quotient; digits are stacked then emitted.
 _bootDebugDec32:
-	movem.l	d0-d5/a0/a6,-(sp)
+	movem.l	d0-d5/a2/a6,-(sp)
 	move.l	(_AbsExecBase).w,a6
-	move.l	sp,a0			;digit-stack marker
+	move.l	sp,a2			;digit-stack marker, kept across RawPutChar
 	tst.l	d0
 	bne.s	_bdd_loop
 	moveq.l	#'0',d0
@@ -1595,14 +1597,14 @@ _bdd_loop:
 	tst.l	d0
 	bne.s	_bdd_loop
 _bdd_emit:
-	cmp.l	sp,a0
+	cmp.l	sp,a2
 	beq.s	_bdd_done
 	moveq.l	#0,d0
 	move.b	(sp)+,d0
 	jsr	RawPutChar(a6)
 	bra.s	_bdd_emit
 _bdd_done:
-	movem.l	(sp)+,d0-d5/a0/a6
+	movem.l	(sp)+,d0-d5/a2/a6
 	rts
 
 ;-- Print " (<dostype>, <MB> MB)" + LF for the PartEntry in a3.
