@@ -10,11 +10,17 @@
           (help @askbool-help)
           (default 0)))))
   (if copy-go
-    (copyfiles
-      (prompt (cat "Copying " (fileonly copy-src) " to " copy-dest))
-      (help @copyfiles-help)
-      (source copy-src)
-      (dest copy-dest))))
+    (
+      (copyfiles
+        (prompt (cat "Copying " (fileonly copy-src) " to " copy-dest))
+        (help @copyfiles-help)
+        (source copy-src)
+        (dest copy-dest))
+      (protect copy-file "+e"))))
+; copy c/tool-name to C:; copyfiles keeps the source bits, so e is set here
+(procedure P_TOOL
+  (copyfiles (source (tackon "c" tool-name)) (dest "C:"))
+  (protect (tackon "C:" tool-name) "+e"))
 ; fa-active 1 when the first line of fa-file matching fa-pattern is not a comment;
 ; Search matches anywhere in a line and getenv returns only the first line
 (procedure P_FIRST_ACTIVE
