@@ -7,6 +7,7 @@ macro through a probe routine assembled per CPU and compare with Python.
 
 Status: gated, run by make test.
 Run from the repository root: python3 tests/umul32.py"""
+
 import random
 import sys
 import tempfile
@@ -35,16 +36,18 @@ def pairs():
     rng = random.Random(32)
     edge = [0, 1, 2, 0xFFFF, 0x10000, 0x10001, 0xFFFFFFFF, 0x80000000, 0x7FFFFFFF]
     out = [(a, b) for a in edge for b in edge]
-    out += [(rng.getrandbits(rng.randint(1, 32)), rng.getrandbits(rng.randint(1, 32)))
-            for _ in range(3000)]
+    out += [
+        (rng.getrandbits(rng.randint(1, 32)), rng.getrandbits(rng.randint(1, 32)))
+        for _ in range(3000)
+    ]
     return out
 
 
 def run(cpu, tmp):
-    src = Path(tmp) / ('probe%s.s' % cpu)
+    src = Path(tmp) / ("probe%s.s" % cpu)
     src.write_text(PROBE)
-    obj = Path(tmp) / ('probe%s' % cpu)
-    assemble(obj, source=str(src), cpu=cpu, defines=['-D__68020__=1'] if cpu == '68020' else [])
+    obj = Path(tmp) / ("probe%s" % cpu)
+    assemble(obj, source=str(src), cpu=cpu, defines=["-D__68020__=1"] if cpu == "68020" else [])
     image = BinFmt().load_image(str(obj))
     m = Machine.from_name(cpu, ram_size=1024)
     cpu_, mem = m.get_cpu(), m.get_mem()
@@ -62,7 +65,7 @@ def run(cpu, tmp):
             if overflow != (product > 0xFFFFFFFF) or (not overflow and cpu_.r_reg(0) != product):
                 bad.append((hex(a), hex(b), hex(cpu_.r_reg(0)), overflow))
             if cpu_.r_reg(1) != b:
-                bad.append(('d1 clobbered', hex(a), hex(b)))
+                bad.append(("d1 clobbered", hex(a), hex(b)))
     finally:
         m.cleanup()
     return bad
@@ -71,14 +74,14 @@ def run(cpu, tmp):
 def main():
     failed = 0
     with tempfile.TemporaryDirectory() as tmp:
-        for cpu in ('68000', '68020'):
+        for cpu in ("68000", "68020"):
             bad = run(cpu, tmp)
-            print('%s %d pairs, %d wrong' % (cpu, len(pairs()), len(bad)))
+            print("%s %d pairs, %d wrong" % (cpu, len(pairs()), len(bad)))
             for b in bad[:10]:
-                print('  ', b)
+                print("  ", b)
             failed += len(bad)
     sys.exit(1 if failed else 0)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
