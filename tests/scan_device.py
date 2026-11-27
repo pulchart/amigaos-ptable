@@ -5,9 +5,6 @@ Each case builds a medium, runs the library's scan through the device layer
 (read-method probe, block reads, CHANGESTATE, the resource lock) and checks
 the published rows. Case ids: A block size, C device I/O, E RDB blocks,
 G media without a table, I 32-bit limits, J table walks.
-OPEN lists the ids whose fix has not landed: their check must still fail, so
-the suite stays green before and after each fix and the fixing commit removes
-the id here.
 
 Status: gated, run by make test.
 Run from the repository root: python3 tests/scan_device.py"""
@@ -17,8 +14,6 @@ import sys
 import images as im
 import mockdev as md
 from mockexec import Rig, builds
-
-OPEN = set()
 
 FAT = 0x46415400
 PES_MBR, PES_GPT, PES_RDB, PES_FLAT = 0, 1, 2, 3
@@ -36,7 +31,7 @@ def clean(rig):
     return not (rig.overruns or rig.check_guards() or rig.bad_frees or rig.leaks())
 
 
-# -- baseline cases: must pass on every commit ---------------------------------
+# -- partition scans ---------------------------------------------------------
 def c_mbr512(b):
     disk = md.Disk(im.mbr_disk([(0x80, 0x0C, 2048, 0x8000), (0, 0x06, 0x9000, 0x4000)]))
     rig = scan(b, disk)
@@ -108,7 +103,7 @@ def c_unreadable_keeps(b):
     return len(before) == 2 and [(r['name'], r['flags']) for r in rig.rows()] == before and clean(rig)
 
 
-# -- audit cases -------------------------------------------------------------
+# -- malformed media and device failures -------------------------------------
 def c_gpt4k(b):
     """A: GPT on a 4096-byte device; rows in native blocks, no overrun."""
     disk = md.Disk(im.gpt_disk([(im.MS_BASIC, 256, 4351)], bs=4096, total=1 << 18), bs=4096,
@@ -377,12 +372,10 @@ def main():
                 ok = bool(fn(build))
             except AssertionError as e:
                 ok, label = False, '%s (%s)' % (label, e)
-            want = ident not in OPEN
-            if ok != want:
-                failures.append('%s %s [%s]: %s' % (build.name, label, ident or 'base',
-                                                    'passes, remove from OPEN' if ok else 'FAILS'))
+            if not ok:
+                failures.append('%s %s [%s]' % (build.name, label, ident or '-'))
             print('%-11s %-5s %-34s %s' % (build.name, ident or '-', label[:34],
-                                            'ok' if ok else 'open'))
+                                            'ok' if ok else 'FAIL'))
     for f in failures:
         print('FAIL', f)
     sys.exit(1 if failures else 0)
