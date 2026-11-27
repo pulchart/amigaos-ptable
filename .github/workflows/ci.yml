@@ -171,7 +171,6 @@ jobs:
           path: dist/
       - name: Keep a copy of the build, check that make takes it as current
         run: |
-          chmod 755 dist/c/lsptres
           cp -r dist "$RUNNER_TEMP/build"
           touch -d @0 dist/version.stamp
           make -q all
@@ -187,9 +186,11 @@ jobs:
           build=$RUNNER_TEMP/build
           for f in full/68000 full/68020 small/68000 small/68020; do
             cmp "$build/$f/ptable.library" "unpacked/ptable/$f/libs/ptable.library"
+            [ -x "unpacked/ptable/$f/libs/ptable.library" ]
             strings "$build/$f/ptable.library" | grep -F "ptable.library $plib_version ($plib_date)" >/dev/null
           done
           cmp "$build/c/lsptres" unpacked/ptable/c/lsptres
+          [ -x unpacked/ptable/c/lsptres ]
           for f in ptable/Install ptable/LICENSE ptable/ptable.readme ptable.info \
                    ptable/docs/changes.guide ptable/docs/lsptres.guide ptable/docs/ptable.guide; do
             [ -e "unpacked/$f" ] || { echo "$archive lacks $f" >&2; exit 1; }

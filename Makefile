@@ -191,6 +191,7 @@ $(README_NAME): $(README_TEMPLATE) $(TARGETS) dist/c/lsptres
 STAGE   = build/stage
 INSTALL = install
 
+# LhA on the Amiga turns the file modes into protection bits, programs need e
 stage: all guides readme
 	$(Q)rm -rf $(STAGE)
 	$(Q)mkdir -p $(STAGE)/ptable/c $(STAGE)/ptable/docs $(STAGE)/ptable/src
@@ -205,6 +206,8 @@ stage: all guides readme
 	$(Q)cp $(README_NAME) $(STAGE)/ptable/ptable.readme
 	$(Q)sed -e "s|@VERSION@|$(VERSION)|" -e "s|@DATE@|$(DATE)|" $(INSTALL)/ptable.head $(INSTALL)/common.inc $(INSTALL)/ptable.inc $(INSTALL)/ptable.tail > $(STAGE)/ptable/Install
 	$(Q)cp -r icons/. $(STAGE)/
+	$(Q)chmod -R u=rwX,go=rX $(STAGE)
+	$(Q)chmod 755 $(STAGE)/ptable/c/* $(STAGE)/ptable/*/*/libs/*
 
 # Create the Aminet-compatible LHA release (archive + readme).
 release: check-lha version-readme stage
