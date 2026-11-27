@@ -68,7 +68,7 @@ README_TEMPLATE = dist.readme.in
 
 COMPONENT_VERSIONS_NL = $(shell sh tools/components.sh plain $(COMPONENT_ARGS))
 
-.PHONY: all clean distclean lsptres guide guides version-readme readme release check-lha stage test check-test-deps test-list-update
+.PHONY: all clean distclean lsptres guide guides version-readme readme release check-lha stage test check-test-deps test-list-update lint
 all: $(TARGETS) dist/ptable.version dist/lsptres.version dist/c/lsptres
 
 # Rewrite the topmost release-notes header and the COMPONENTS block in
@@ -235,6 +235,12 @@ check-test-deps:
 test-list-update:
 	$(Q)$(PYTHON) $(TESTDIR)/list_tests.py --update
 	$(Q)echo "Updated: $(TESTDIR)/INVENTORY.md"
+
+# ruff over the tracked Python files (rules in ruff.toml), yamllint over the YAML files.
+lint:
+	$(Q)ruff check $$(git ls-files '*.py')
+	$(Q)ruff format --check $$(git ls-files '*.py')
+	$(Q)yamllint -s $$(git ls-files '*.yaml' '*.yml')
 
 clean:
 	$(Q)rm -rf dist build $(VERSION_INC)
