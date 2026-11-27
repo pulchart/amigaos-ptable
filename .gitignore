@@ -4,3 +4,7 @@ NDK/
 __pycache__/
 *.py[co]
 build/
+dist/c/
+dist/docs/
+dist/full/
+dist/small/
