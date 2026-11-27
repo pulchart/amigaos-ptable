@@ -40,8 +40,9 @@ for entry in "$@"; do
 
 	# Without the previous release there is nothing to compare against, and a
 	# source export has no git history, so mark nothing rather than everything.
+	# CI_SUFFIX marks the build, not a change of the component.
 	new=
-	[ -n "$prev" ] && [ -n "$oldmk" ] && [ "$ver ($date)" != "$ov ($od)" ] && new=1
+	[ -n "$prev" ] && [ -n "$oldmk" ] && [ "${ver%"$CI_SUFFIX"} ($date)" != "$ov ($od)" ] && new=1
 
 	if [ "$fmt" = md ]; then
 		line="- \`$name $ver ($date)\`${new:+ _(new)_}"
