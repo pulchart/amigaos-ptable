@@ -30,4 +30,4 @@
       (prompt "Copy lsptres to C:?")
       (help "lsptres lists the partitions in partition.resource.")
       (default 1))
-    (copyfiles (source "c/lsptres") (dest "C:"))))
+    ((set tool-name "lsptres") (P_TOOL))))
