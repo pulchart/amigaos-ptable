@@ -18,19 +18,26 @@ LSPTRES_NAME = lsptres
 COMPONENTS   = PLIB LSPTRES
 COMPONENT_ARGS = $(foreach c,$(COMPONENTS),'$(c)|$($(c)_NAME)|$($(c)_VERSION)|$($(c)_DATE)')
 
-VASM_HOME ?= /opt/vasm
-VASM       = $(VASM_HOME)/bin/vasmm68k_mot
+# Every target runs in the amiga-toolchain image: the tools are on its PATH,
+# VBCC and NDK in its environment
+TOOLCHAIN_IMAGE ?= ghcr.io/pulchart/amiga-toolchain:latest
+#TOOLCHAIN_IMAGE ?= docker.io/pulchart/amiga-toolchain:latest
+TESTDIR = tests
 
-# The test scripts assemble src/ themselves; PTABLE_VASM is how they are told
-# to use exactly the assembler this Makefile uses.
-PYTHON    ?= python3
-TESTDIR    = tests
-export PTABLE_VASM = $(VASM)
-
-VBCC_HOME ?= /opt/vbcc
-VBCC       = $(VBCC_HOME)/bin/vc
-NDK       ?= NDK
-MD2GUIDE  ?= ../cfd/tools/md2guide.py
+# Outside the image make runs the goals in TOOLCHAIN_IMAGE, pulled when the registry
+# has a newer one, mounting the git dir too when it lies outside the checkout
+# (worktree, submodule)
+ifeq ($(wildcard /usr/share/amiga-toolchain/toolchain.json),)
+GOALS      := $(or $(MAKECMDGOALS),all)
+GIT_COMMON := $(shell d=$$(git rev-parse --git-common-dir 2>/dev/null) && cd "$$d" && pwd)
+.PHONY: $(GOALS)
+$(firstword $(GOALS)):
+	@podman run --rm --pull=newer --security-opt label=disable -v $(CURDIR):$(CURDIR) -w $(CURDIR) \
+		$(foreach d,$(filter-out $(CURDIR)/%,$(GIT_COMMON)),-v $(d):$(d)) \
+		$(TOOLCHAIN_IMAGE) make $(MAKEOVERRIDES) $(GOALS)
+$(wordlist 2,$(words $(GOALS)),$(GOALS)):
+	@:
+else
 
 ifeq ($(V),1)
   Q =
@@ -100,7 +107,7 @@ $(TARGETS): dist/%/ptable.library: $(LIB_SOURCE) $(LIB_DEPS) $(VERSION_INC)
 	$(eval cpu  := $(word 2,$(subst /, ,$*)))
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  VASM    $@ [$(flav), $(cpu)]"
-	$(Q)$(VASM) $(VASMFLAGS) $(CPU_$(cpu)) $(DBG_$(flav)) -I $(SRC) -o $@ $(LIB_SOURCE)
+	$(Q)vasmm68k_mot $(VASMFLAGS) $(CPU_$(cpu)) $(DBG_$(flav)) -I $(SRC) -o $@ $(LIB_SOURCE)
 	$(Q)echo "          $$(stat -c%s $@) bytes, md5:$$(md5sum $@ | cut -c1-8)"
 
 dist/ptable.version: $(VERSION_INC)
@@ -116,24 +123,24 @@ lsptres: dist/c/lsptres
 dist/c/lsptres: $(SRC)/lsptres.c $(SRC)/page.c $(SRC)/page.h Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  VBCC    $@"
-	$(Q)VBCC=$(VBCC_HOME) PATH=$(VBCC_HOME)/bin:$$PATH $(VBCC) +aos68k -O2 -c99 -I$(NDK)/Include_H -DVERSION='"$(LSPTRES_VERSION)"' -DDATE='"$(LSPTRES_DATE)"' -o $@ $(SRC)/lsptres.c $(SRC)/page.c
+	$(Q)vc +aos68k -O2 -c99 -I$(NDK)/Include_H -DVERSION='"$(LSPTRES_VERSION)"' -DDATE='"$(LSPTRES_DATE)"' -o $@ $(SRC)/lsptres.c $(SRC)/page.c
 	$(Q)echo "          $$(stat -c%s $@) bytes, md5:$$(md5sum $@ | cut -c1-8)"
 
 guide guides: dist/docs/lsptres.guide dist/docs/ptable.guide dist/docs/changes.guide
 dist/docs/changes.guide: docs/changes.md Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  GUIDE   $@"
-	$(Q)python3 $(MD2GUIDE) docs/changes.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library release notes" --ver-title "ptable.library release notes guide"
+	$(Q)md2guide docs/changes.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library release notes" --ver-title "ptable.library release notes guide"
 
 dist/docs/lsptres.guide: docs/lsptres.md Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  GUIDE   $@"
-	$(Q)python3 $(MD2GUIDE) docs/lsptres.md $@ --version $(LSPTRES_VERSION) --date $(LSPTRES_DATE) --title "lsptres" --ver-title "lsptres guide"
+	$(Q)md2guide docs/lsptres.md $@ --version $(LSPTRES_VERSION) --date $(LSPTRES_DATE) --title "lsptres" --ver-title "lsptres guide"
 
 dist/docs/ptable.guide: docs/ptable.md Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  GUIDE   $@"
-	$(Q)python3 $(MD2GUIDE) docs/ptable.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library" --ver-title "ptable.library guide"
+	$(Q)md2guide docs/ptable.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library" --ver-title "ptable.library guide"
 
 # ============================================================
 # Release targets
@@ -224,16 +231,16 @@ TEST_CHECKS = audit_cold_registration.py audit_hunk_bounds.py parts_walker.py \
 test: check-test-deps
 	$(Q)for check in $(TEST_CHECKS); do \
 		echo "  TEST    $$check"; \
-		$(PYTHON) $(TESTDIR)/$$check || exit 1; \
+		python3 $(TESTDIR)/$$check || exit 1; \
 	done
 
 # Deliberately does not depend on the assembler being present: a missing
 # assembler is the thing this target exists to report.
 check-test-deps:
-	$(Q)$(PYTHON) $(TESTDIR)/deps.py
+	$(Q)python3 $(TESTDIR)/deps.py
 
 test-list-update:
-	$(Q)$(PYTHON) $(TESTDIR)/list_tests.py --update
+	$(Q)python3 $(TESTDIR)/list_tests.py --update
 	$(Q)echo "Updated: $(TESTDIR)/INVENTORY.md"
 
 # ruff over the tracked Python files (rules in ruff.toml), yamllint over the YAML files.
@@ -247,3 +254,5 @@ clean:
 
 distclean: clean
 	$(Q)rm -f ptable*.lha ptable*.readme
+
+endif
