@@ -1,0 +1,178 @@
+---
+name: CI
+
+"on":
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # TOOLCHAIN_IMAGE from the Makefile, pinned to its current digest for every job
+  image:
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve the toolchain image
+        id: resolve
+        run: |
+          image=$(sed -n 's/^TOOLCHAIN_IMAGE ?= *//p' Makefile)
+          info=$(skopeo inspect "docker://$image")
+          ref="${image%:*}@$(jq -r .Digest <<<"$info")"
+          echo "ref=$ref" >>"$GITHUB_OUTPUT"
+          {
+            echo
+            echo "### Toolchain image"
+            echo
+            echo "\`$image\` = \`$ref\`"
+            echo
+            echo "| tool | version |"
+            echo "|---|---|"
+            for l in vasm vlink vbcc ndk ruff yamllint fedora build; do
+              key=$l.version; [ "$l" = build ] && key=build.date
+              echo "| $l | $(jq -r --arg k "$key" '.Labels[$k] // "?"' <<<"$info") |"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  lint:
+    needs: image
+    runs-on: ubuntu-24.04
+    container: ${{ needs.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trust the checkout, which another user owns
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: ruff and yamllint
+        run: make lint
+
+  build:
+    needs: image
+    runs-on: ubuntu-24.04
+    container: ${{ needs.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - name: Trust the checkout, which another user owns
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build the libraries, lsptres and the guides
+        run: make all guides
+      - name: Summary
+        run: |
+          {
+            echo
+            echo "### Build"
+            echo
+            echo "| file | version | bytes | MD5 |"
+            echo "|---|---|---|---|"
+            for f in dist/*/*/ptable.library dist/c/lsptres; do
+              ver=$(strings "$f" | sed -n '/VER: /{s/.*VER: //p;q}')
+              echo "| \`$f\` | $ver | $(stat -c%s "$f") | \`$(md5sum "$f" | cut -c1-32)\` |"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ptable-dist
+          path: dist/
+
+  test:
+    needs: image
+    runs-on: ubuntu-24.04
+    container: ${{ needs.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trust the checkout, which another user owns
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Emulated test suites
+        run: |
+          set +e
+          make test 2>&1 | tee test.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          suites=$(sed -n 's/^  TEST    //p' test.log)
+          {
+            echo
+            echo "### Tests"
+            echo
+            echo "| suite | result |"
+            echo "|---|---|"
+            for s in $suites; do
+              r=passed
+              [ "$rc" -ne 0 ] && [ "$s" = "$(tail -n 1 <<<"$suites")" ] && r="**failed**"
+              echo "| \`$s\` | $r |"
+            done
+            [ -n "$suites" ] || [ "$rc" -eq 0 ] || echo "| dependency check | **failed** |"
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+  # the release archive from the build job's output, checked against it
+  package:
+    needs: [image, lint, build, test]
+    runs-on: ubuntu-24.04
+    container: ${{ needs.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - name: Trust the checkout, which another user owns
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/download-artifact@v8
+        with:
+          name: ptable-dist
+          path: dist/
+      - name: Keep a copy of the build, check that make takes it as current
+        run: |
+          chmod 755 dist/c/lsptres
+          cp -r dist "$RUNNER_TEMP/build"
+          make -q all
+      - name: Archive and readme
+        run: make release
+      - name: Check the archive against the build
+        run: |
+          archive=$(ls ptable.v*.lha)
+          read -r plib_version plib_date <dist/ptable.version
+          mkdir unpacked
+          lha -xqw=unpacked "$archive"
+          if grep -rl '^version https://git-lfs' unpacked; then echo "$archive holds LFS pointers" >&2; exit 1; fi
+          build=$RUNNER_TEMP/build
+          for f in full/68000 full/68020 small/68000 small/68020; do
+            cmp "$build/$f/ptable.library" "unpacked/ptable/$f/libs/ptable.library"
+            strings "$build/$f/ptable.library" | grep -F "ptable.library $plib_version ($plib_date)" >/dev/null
+          done
+          cmp "$build/c/lsptres" unpacked/ptable/c/lsptres
+          for f in ptable/Install ptable/LICENSE ptable/ptable.readme ptable.info \
+                   ptable/docs/changes.guide ptable/docs/lsptres.guide ptable/docs/ptable.guide; do
+            [ -e "unpacked/$f" ] || { echo "$archive lacks $f" >&2; exit 1; }
+          done
+          {
+            echo
+            echo "### Package"
+            echo
+            echo "\`$archive\`, $(stat -c%s "$archive") bytes, $(find unpacked -type f | wc -l) files, SHA-256 \`$(sha256sum "$archive" | cut -c1-64)\`"
+            echo
+            echo "Its libraries and lsptres are the build job's bytes, the libraries carry ptable.library $plib_version ($plib_date)."
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        id: upload
+        with:
+          name: ptable-release
+          path: |
+            ptable.v*.lha
+            ptable.v*.readme
+      - name: Link the archive in the summary
+        env:
+          URL: ${{ steps.upload.outputs.artifact-url }}
+        run: printf '\n[Download ptable-release](%s)\n' "$URL" >>"$GITHUB_STEP_SUMMARY"

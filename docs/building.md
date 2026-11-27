@@ -6,7 +6,7 @@ Podman. Every target runs in the [amiga-toolchain](https://github.com/pulchart/c
 
 `make` and `make guides` write the binaries and guides to `dist/`, which git ignores except for the version stamps `dist/*.version`.
 
-CI builds, lints and tests every pull request and master push in the same image and uploads `dist/` as the `ptable-dist` artifact.
+CI runs on every pull request, master push and manual run in the image's current digest. It lints, builds and tests in parallel and uploads the build as `ptable-dist`. Then it packs that build into the release archive, checks that the archive holds the build's libraries and lsptres and uploads the archive with its readme as `ptable-release`. Each run's summary lists the image, the built files, the test suites and the archive with a download link.
 
 ## Release
 
