@@ -4,7 +4,7 @@ Assembled routines run in amitools/vamos against mocked Exec, resource and devic
 
 ## Requires
 
-`make test` runs the suites in the amiga-toolchain image, which holds vasm 2.0f, Python 3.14+ and the pinned amifuse forks of `amitools` and `machine68k` listed in `requirements.txt`, see [docs/building.md](../docs/building.md).
+`make test` runs the suites in the amiga-toolchain image, which holds vasm 2.0f, Python 3.14+, `amitools` and `machine68k` at the versions in its `requirements.txt`, see [docs/building.md](../docs/building.md). For Python runs outside the image, `uv pip install -r` that file into a venv.
 
 `make lint` runs ruff and yamllint; `pre-commit install` runs them before each commit.
 
