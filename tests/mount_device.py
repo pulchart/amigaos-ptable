@@ -119,7 +119,7 @@ def c_own_device_name(b):
     for d in rig.dos_nodes():
         blob, dev = blobs[d["name"]], d["device"]
         size = rig.mem.r32(
-            [r for r in rig.rows() if r["name"] == d["name"]][0]["addr"] + rig.eq["pe_BlobSize"]
+            next(r for r in rig.rows() if r["name"] == d["name"])["addr"] + rig.eq["pe_BlobSize"]
         )
         name = bytes(rig.mem.r_block(dev + 1, rig.mem.r8(dev))).decode()
         out.append(blob < dev and dev + 1 + len(name) <= blob + size and name == "test.device")
@@ -530,7 +530,10 @@ def c_fs_type(b):
     eq = rig.eq
     row = rig.rows()[0]
     node = rig.mem.r32(row["addr"] + eq["pe_DevNode"])
-    name = lambda: bytes(rig.mem.r_block(row["addr"] + eq["pe_FsName"], 8))
+
+    def name():
+        return bytes(rig.mem.r_block(row["addr"] + eq["pe_FsName"], 8))
+
     text = rig.alloc_static(16)
 
     def set_fs(dev_node, fs):

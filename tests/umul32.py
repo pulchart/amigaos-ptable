@@ -16,7 +16,7 @@ from pathlib import Path
 from amitools.binfmt.BinFmt import BinFmt
 from amitools.binfmt.Relocate import Relocate
 from amitools.vamos.machine import Machine
-from toolchain import ROOT, assemble
+from toolchain import assemble
 
 BASE, STACK = 0x10000, 0x80000
 

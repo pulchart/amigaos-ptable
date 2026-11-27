@@ -15,7 +15,7 @@ from pathlib import Path
 
 from toolchain import VASM, EXPECTED_VASM_VERSION
 
-MIN_PYTHON = (3, 11)
+MIN_PYTHON = (3, 14)
 
 # Distribution name, the version the suite was last green against, and the hint.
 # The package names are not the import names: amitools-amifuse provides amitools.
@@ -53,7 +53,7 @@ def vasm_banner():
     try:
         out = subprocess.run([str(VASM), "-v"], capture_output=True, text=True, timeout=10)
         return (out.stdout + out.stderr).strip().splitlines()[0]
-    except (OSError, subprocess.SubprocessError, IndexError):
+    except OSError, subprocess.SubprocessError, IndexError:
         return "<not runnable>"
 
 

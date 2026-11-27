@@ -7,7 +7,10 @@ exec.library and _psFreeEntry; the helper itself is the real assembled code.
 Status: gated, run by make test on both CPU tiers and both flavours.
 Run from the repository root: python3 tests/unlink_free_entry.py [--source DIR]"""
 
-import argparse, json, sys, tempfile
+import argparse
+import json
+import sys
+import tempfile
 from pathlib import Path
 from amitools.binfmt.BinFmt import BinFmt
 from amitools.binfmt.Relocate import Relocate
@@ -48,7 +51,7 @@ with tempfile.TemporaryDirectory() as tmp:
                 calls = []
                 args_seen = {}
 
-                def mk(name):
+                def mk(name, calls=calls, args_seen=args_seen, cpu_o=cpu_o):
                     def f():
                         calls.append(name)
                         if name == "Remove":
@@ -57,11 +60,12 @@ with tempfile.TemporaryDirectory() as tmp:
                     return f
 
                 for n, off in LVO.items():
-                    tid = m.get_traps().alloc(lambda op, pc, fn=mk(n): fn())
+                    fn = mk(n)
+                    tid = m.get_traps().alloc(lambda op, pc, fn=fn: fn())
                     mem.w16(EXEC + off, 0xA000 | tid)
                     mem.w16(EXEC + off + 2, 0x4E75)
 
-                def freed():
+                def freed(calls=calls, args_seen=args_seen, cpu_o=cpu_o):
                     calls.append("free")
                     args_seen["free_a0"] = cpu_o.r_reg(8)
 

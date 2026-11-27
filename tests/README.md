@@ -4,7 +4,9 @@ Assembled routines run in amitools/vamos against mocked Exec, resource and devic
 
 ## Requires
 
-Linux, Python 3.11+ and [vasm 2.0f](http://sun.hasenbraten.de/vasm/), built with `make CPU=m68k SYNTAX=mot` and installed under `/opt/vasm` or `VASM_HOME`.
+Linux, Python 3.14+ and [vasm 2.0f](http://sun.hasenbraten.de/vasm/), built with `make CPU=m68k SYNTAX=mot` and installed under `/opt/vasm` or `VASM_HOME`.
+
+`make lint` runs ruff and yamllint; `pre-commit install` runs them before each commit.
 
 From the repository root:
 

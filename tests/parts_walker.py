@@ -19,7 +19,7 @@ from pathlib import Path
 from amitools.binfmt.BinFmt import BinFmt
 from amitools.binfmt.Relocate import Relocate
 from amitools.vamos.machine import Machine
-from toolchain import ROOT, assemble
+from toolchain import assemble
 
 BASE, BUF, BLOCK, CB, STACK = 0x10000, 0x40000, 0x42000, 0x44000, 0x90000
 NEED = (

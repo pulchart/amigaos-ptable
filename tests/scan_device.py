@@ -9,7 +9,6 @@ G media without a table, I 32-bit limits, J table walks.
 Status: gated, run by make test.
 Run from the repository root: python3 tests/scan_device.py"""
 
-import struct
 import sys
 
 import images as im
