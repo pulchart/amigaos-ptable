@@ -16,24 +16,14 @@
 
 ;--- from expansion.library --------------------------------
 AddBootNode	= -36
-AddConfigDev	= -30
 AddDosNode	= -150
 
 ;--- ConfigDev layout (libraries/configvars.i) -------------
-;   Only the fields actually written by the synthetic ConfigDev
-;   below are defined here; full layout lives in NDK.
-CD_NODE_TYPE	= 8
-CD_NODE_NAME	= 10
+;   Only the fields strap reads; the static ConfigDev is in
+;   ptable_dosdiag.i.
 CD_ER_TYPE	= 16
-CD_ER_PRODUCT	= 17
-CD_ER_MANUF	= 20
-CD_ER_SERIAL	= 22
 CD_ER_RESERVED0C = 28
-CD_BOARDADDR	= 32
-CD_BOARDSIZE	= 36
 CD_SIZEOF	= 68
-
-NT_CONFIGDEV	= 20
 ERTF_DIAGVALID	= $10
 
 ;--- from dos.library --------------------------------------
@@ -236,13 +226,13 @@ PTDEC	macro
 ;      20     4   BC_FSResource   FileSystem.resource (lazy)
 ;      24     1   BC_DevOpen      1 if OpenDevice succeeded
 ;      25     1   BC_SigOK        allocated signal number, -1 = none
-;      26     1   BC_HaveNodes    1 if any AddBootNode/AddDosNode ran
+;      26     1   (unused)
 ;      27     1   BC_PartCount    count of partitions registered
 ;      28    34   BC_DevMsgPort
 ;      62    56   BC_DevIOReq
 ;     118     1   BC_ReadMode     cached read method (PERM_*, 0 = unprobed)
 ;     119     1   (pad to long)
-;     120     4   BC_ConfigDev    synthetic ConfigDev (0 = none)
+;     120     4   (unused)
 ;     124     4   BC_DevName      caller's device name string
 ;     128     4   BC_DevNameBSTR  cached BSTR(BPTR) of BC_DevName
 ;                                 for fssm_Device (0 = alloc failed,
@@ -267,12 +257,10 @@ BC_BlockBuf	= 16
 BC_FSResource	= 20
 BC_DevOpen	= 24
 BC_SigOK	= 25
-BC_HaveNodes	= 26
 BC_PartCount	= 27
 BC_DevMsgPort	= 28
 BC_DevIOReq	= 62
 BC_ReadMode	= 118		;cached read method (0 = not yet probed)
-BC_ConfigDev	= 120
 BC_DevName	= 124
 BC_DevNameBSTR	= 128
 BC_UnmountPrefixes = 132	;ptr to 0-terminated dostype-prefix list (UnmountPartitions); 0 = all
@@ -439,33 +427,6 @@ bs_haveCtx:
 	bra.w	bs_cleanup
 bs_haveExp:
 
-;-- Synthesize a ConfigDev for the device.
-;   (The ConfigDev's CD_NODE_NAME points at the caller's device
-;   name string so strap renders the early-startup menu against
-;   the correct device. ER_TYPE = ERTF_DIAGVALID together with
-;   er_Reserved0c -> s_rdb_diag_rom drives the BootPoint flow:
-;   strap copies the DiagArea to RAM and calls da_BootPoint,
-;   which then runs FindResident("dos.library") + RT_INIT.)
-	move.l	a5,a6			;ExecBase
-	move.l	#CD_SIZEOF,d0
-	move.l	#MEMF_PUBLIC+MEMF_CLEAR,d1
-	jsr	AllocMem(a6)
-	tst.l	d0
-	beq.w	bs_no_cd
-	move.l	d0,BC_ConfigDev(a4)
-	move.l	d0,a2
-	move.b	#NT_CONFIGDEV,CD_NODE_TYPE(a2)
-	move.l	BC_DevName(a4),CD_NODE_NAME(a2)
-	move.b	#$C0|ERTF_DIAGVALID|4,CD_ER_TYPE(a2)	;Z-II, diag, 512KB
-	lea	s_rdb_diag_rom(pc),a0
-	move.l	a0,CD_ER_RESERVED0C(a2)
-	move.b	#1,CD_ER_PRODUCT(a2)
-	move.w	#$FFFF,CD_ER_MANUF(a2)		;no vendor
-	move.l	#$52444230,CD_ER_SERIAL(a2)	;'RDB0'
-	move.l	#$00A00000,CD_BOARDADDR(a2)	;PCMCIA attributes base
-	move.l	#$00080000,CD_BOARDSIZE(a2)	;512 KB
-bs_no_cd:
-
 ;-- open dos.library; used for Delay() only. OK to be NULL.
 	move.l	a5,a6
 	moveq.l	#0,d0
@@ -491,22 +452,6 @@ bs_no_cd:
 bs_close_unit:
 	bsr	_bootCloseUnit		;idempotent: handles partial open
 
-;-- Register synthetic ConfigDev with strap (eb_CDevList) so the
-;   early-startup boot menu shows the device and the BootPoint
-;   fires when the user picks a bootable partition. Guarded:
-;   only call when at least one partition was registered.
-	tst.b	BC_HaveNodes(a4)
-	beq.s	bs_close
-	move.l	BC_ConfigDev(a4),d0
-	beq.s	bs_close
-	move.l	BC_ExpBase(a4),d0
-	beq.s	bs_close
-	move.l	d0,a6
-	move.l	BC_ConfigDev(a4),a0
-	jsr	AddConfigDev(a6)
-	clr.l	BC_ConfigDev(a4)	;owned by expansion now
-
-bs_close:
 	move.l	BC_ExecBase(a4),a6
 	move.l	BC_DosBase(a4),d0
 	beq.s	bs_close1
@@ -520,13 +465,6 @@ bs_close1:
 
 bs_cleanup:
 	bsr	_bootFreeDevBSTR
-;-- a ConfigDev that was never handed to AddConfigDev is still ours
-	move.l	BC_ConfigDev(a4),d0
-	beq.s	bs_nocdfree
-	move.l	d0,a1
-	move.l	#CD_SIZEOF,d0
-	jsr	FreeMem(a6)
-bs_nocdfree:
 	moveq.l	#0,d6
 	move.b	BC_PartCount(a4),d6	;return value = partitions registered
 	ifd	DEBUG

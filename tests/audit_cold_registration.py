@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Successful cold registration retains its device-node blob.
+"""Successful cold registration retains its device-node blob; a bootable
+partition hands AddBootNode the static ConfigDev whose DiagArea strap boots.
 
 Drives the real _actCold and mocks the resource lookup, the matching, the blob
 creation, the expansion calls and the debug output.
@@ -63,7 +64,7 @@ def observe(image, cpu_name, flavor, bootable, succeeds):
                 trap(symbols[name], lambda: None)
 
         def add_node(command):
-            events.append([command, cpu.r_reg(8)])
+            events.append([command, cpu.r_reg(8), cpu.r_reg(9)])
             result(int(succeeds))
 
         trap(EXP - 36, lambda: add_node("AddBootNode"))
@@ -90,6 +91,16 @@ def observe(image, cpu_name, flavor, bootable, succeeds):
         mounted = bool(mem.r8(ENTRY + 27) & 8)
         freed = ["FreeMem", BLOB, BLOB_SIZE] in events
         assert registered == int(succeeds) and mounted == succeeds
+        if bootable:
+            boot = [e for e in events if e[0] == "AddBootNode"]
+            assert len(boot) == 1, events
+            cd = boot[0][2]
+            diag = symbols["s_rdb_diag_rom"]
+            assert cd == symbols["s_boot_configdev"], events
+            assert mem.r8(cd + 16) & 0x10  # er_Type: ERTF_DIAGVALID
+            assert mem.r32(cd + 28) == diag  # er_Reserved0c: the DiagArea
+            assert mem.r8(diag) & 0x10  # da_Config: DAC_CONFIGTIME
+            assert diag + mem.r16(diag + 6) == symbols["s_rdb_bootpoint"]  # da_BootPoint
         if succeeds:
             assert mem.r32(ENTRY + 44) == BLOB
             assert mem.r32(ENTRY + 48) == BLOB
