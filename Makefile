@@ -1,18 +1,18 @@
 # Release version: YYYYMMDD package date + optional in-progress suffix
 # (-dev). Empty suffix for a final release.
-RELEASE_DATE = 20261115
+RELEASE_DATE = 20261127
 VERSION_SUFFIX =
-DATE = 15.11.2026
+DATE = 27.11.2026
 
 # CI sets CI_SUFFIX (-pr<n>.<hash>, ...); it replaces every suffix below,
 # so no CI build carries the name of a release
 CI_SUFFIX ?=
 VERSION = $(RELEASE_DATE)$(or $(CI_SUFFIX),$(VERSION_SUFFIX))
 
-PLIB_MAJOR = 2
-PLIB_MINOR = 3
+PLIB_MAJOR = 3
+PLIB_MINOR = 0
 PLIB_VERSION_SUFFIX =
-PLIB_DATE  = 15.11.2026
+PLIB_DATE  = 27.11.2026
 PLIB_VERSION = $(PLIB_MAJOR).$(PLIB_MINOR)$(or $(CI_SUFFIX),$(PLIB_VERSION_SUFFIX))
 
 LSPTRES_MAJOR = 1
