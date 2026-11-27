@@ -120,7 +120,7 @@ dist/c/lsptres: $(SRC)/lsptres.c $(SRC)/page.c $(SRC)/page.h Makefile
 	$(Q)echo "          $$(stat -c%s $@) bytes, md5:$$(md5sum $@ | cut -c1-8)"
 
 guide guides: dist/docs/lsptres.guide dist/docs/ptable.guide dist/docs/changes.guide
-dist/docs/changes.guide: docs/changes.md
+dist/docs/changes.guide: docs/changes.md Makefile
 	$(Q)mkdir -p $(@D)
 	$(Q)echo "  GUIDE   $@"
 	$(Q)python3 $(MD2GUIDE) docs/changes.md $@ --version $(PLIB_VERSION) --date $(PLIB_DATE) --title "ptable.library release notes" --ver-title "ptable.library release notes guide"
